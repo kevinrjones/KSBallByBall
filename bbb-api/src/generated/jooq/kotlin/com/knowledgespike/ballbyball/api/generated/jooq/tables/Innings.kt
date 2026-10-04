@@ -108,6 +108,11 @@ open class Innings(
      */
     val BOWLING_TEAM_ID: TableField<InningsRecord, Long?> = createField(DSL.name("bowling_team_id"), SQLDataType.BIGINT.nullable(false), this, "")
 
+    /**
+     * The column <code>acs_ball_by_ball.innings.declared</code>.
+     */
+    val DECLARED: TableField<InningsRecord, Boolean?> = createField(DSL.name("declared"), SQLDataType.BOOLEAN.nullable(false), this, "")
+
     private constructor(alias: Name, aliased: Table<InningsRecord>?): this(alias, null, null, null, aliased, null, null)
     private constructor(alias: Name, aliased: Table<InningsRecord>?, parameters: Array<Field<*>?>?): this(alias, null, null, null, aliased, parameters, null)
     private constructor(alias: Name, aliased: Table<InningsRecord>?, where: Condition?): this(alias, null, null, null, aliased, null, where)

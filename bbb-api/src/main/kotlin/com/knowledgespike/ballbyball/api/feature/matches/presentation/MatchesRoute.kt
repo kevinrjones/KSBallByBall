@@ -116,6 +116,7 @@ private fun com.knowledgespike.ballbyball.api.feature.matches.domain.model.Match
                 inningsNumber = innings.inningsNumber,
                 battingTeam = innings.battingTeam,
                 bowlingTeam = innings.bowlingTeam,
+                declared = innings.declared,
                 deliveries = innings.deliveries.map { delivery ->
                     ScoresheetDelivery(
                         deliveryKey = delivery.deliveryKey,

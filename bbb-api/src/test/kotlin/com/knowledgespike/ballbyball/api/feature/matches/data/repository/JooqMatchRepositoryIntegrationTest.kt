@@ -75,7 +75,11 @@ class JooqMatchRepositoryIntegrationTest {
     private fun relationalSchemaAvailable(settings: DatabaseSettings): Boolean = runCatching {
         DriverManager.getConnection(settings.jdbcUrl, settings.user, settings.password).use { connection ->
             connection.createStatement().use { statement ->
-                statement.executeQuery("select id from matches where 1 = 0").use { true }
+                statement.executeQuery("select id from matches where 1 = 0").use {
+                    connection.createStatement().use { inningsStatement ->
+                        inningsStatement.executeQuery("select declared from innings where 1 = 0").use { true }
+                    }
+                }
             }
         }
     }.getOrDefault(false)

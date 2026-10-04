@@ -29,7 +29,9 @@ internal object RelationalWriteSupport {
     val SOURCE_REFERENCE_COLUMNS = listOf(
         "match_id", "provider", "provider_record_key", "source_record_id", "raw_content_digest"
     )
-    val INNINGS_COLUMNS = listOf("id", "match_id", "innings_number", "batting_team_id", "bowling_team_id")
+    val INNINGS_COLUMNS = listOf(
+        "id", "match_id", "innings_number", "batting_team_id", "bowling_team_id", "declared"
+    )
     val INNINGS_JDBC_COLUMNS = INNINGS_COLUMNS.drop(1)
     val WICKET_COLUMNS = listOf("id", "source_wicket_id", "wicket_kind")
     val WICKET_JDBC_COLUMNS = WICKET_COLUMNS.drop(1)
@@ -44,6 +46,15 @@ internal object RelationalWriteSupport {
     val MATCH_PERSON_INSERT_COLUMNS = MATCH_PERSON_COLUMNS.drop(1)
     val DELIVERY_WICKET_COLUMNS = listOf("delivery_id", "wicket_id")
     val DELIVERY_FIELDER_COLUMNS = listOf("delivery_id", "wicket_id", "person_id")
+
+    fun inningsValues(
+        inningsKey: Long,
+        matchId: Long,
+        inningsNumber: Int,
+        battingTeamId: Long,
+        bowlingTeamId: Long,
+        declared: Boolean
+    ): List<Any?> = listOf(inningsKey, matchId, inningsNumber, battingTeamId, bowlingTeamId, declared)
 
     fun insertSql(
         tableName: String,

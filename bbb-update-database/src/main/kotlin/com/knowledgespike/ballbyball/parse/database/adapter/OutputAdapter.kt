@@ -33,7 +33,13 @@ interface OutputAdapter : AutoCloseable {
 
     fun insertSourceReferences(matchId: Long, sources: List<SourceReference>)
 
-    fun upsertInnings(matchId: Long, inningsNumber: Int, battingTeamId: Long, bowlingTeamId: Long): InningsEntity
+    fun upsertInnings(
+        matchId: Long,
+        inningsNumber: Int,
+        battingTeamId: Long,
+        bowlingTeamId: Long,
+        declared: Boolean
+    ): InningsEntity
 
     fun findDeliveryKey(matchId: Long, inningsId: Long, inningsOrder: Int): Long?
 

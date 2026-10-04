@@ -78,6 +78,7 @@ internal class JooqMatchScoresheetLoader(
     private val iMatchKey = dimInnings.MATCH_ID
     private val iBattingTeamKey = dimInnings.BATTING_TEAM_ID
     private val iBowlingTeamKey = dimInnings.BOWLING_TEAM_ID
+    private val iDeclared = dimInnings.DECLARED
     private val fdMatchKey = factDelivery.MATCH_ID
     private val fdInningsKey = factDelivery.INNINGS_ID
     private val fdDeliveryKey = factDelivery.ID
@@ -172,7 +173,7 @@ internal class JooqMatchScoresheetLoader(
                 result = MatchResponseMapper.formatResult(winnerName, match.get(mVictoryType), match.get(fmMargin))
             )
 
-            val inningsRows = dsl.select(iInningsKey, iInningsNumber, ibTeamName, ioTeamName)
+            val inningsRows = dsl.select(iInningsKey, iInningsNumber, iDeclared, ibTeamName, ioTeamName)
                 .from(dimInnings)
                 .leftJoin(dimInningsBattingTeam).on(iBattingTeamKey.eq(ibTeamKey))
                 .leftJoin(dimInningsBowlingTeam).on(iBowlingTeamKey.eq(ioTeamKey))
@@ -297,6 +298,7 @@ internal class JooqMatchScoresheetLoader(
                     inningsNumber = row.get(iInningsNumber) ?: 0,
                     battingTeam = row.get(ibTeamName),
                     bowlingTeam = row.get(ioTeamName),
+                    declared = row.get(iDeclared) ?: false,
                     deliveries = deliveriesByInnings[inningsKey].orEmpty()
                 )
             }

@@ -167,13 +167,24 @@ abstract class JdbcOutputAdapter(protected val connection: Connection) : OutputA
         matchId: Long,
         inningsNumber: Int,
         battingTeamId: Long,
-        bowlingTeamId: Long
+        bowlingTeamId: Long,
+        declared: Boolean
     ): InningsEntity {
         connection.prepareStatement("select id from innings where match_id = ? and innings_number = ?").use { statement ->
             statement.setLong(1, matchId)
             statement.setInt(2, inningsNumber)
             statement.executeQuery().use { results ->
-                if (results.next()) return InningsEntity(results.getLong(1))
+                if (results.next()) {
+                    val inningsKey = results.getLong(1)
+                    connection.prepareStatement(
+                        "update innings set declared = ? where id = ?"
+                    ).use { update ->
+                        update.setBoolean(1, declared)
+                        update.setLong(2, inningsKey)
+                        update.executeUpdate()
+                    }
+                    return InningsEntity(inningsKey)
+                }
             }
         }
         val key = insertWithKey(
@@ -182,10 +193,14 @@ abstract class JdbcOutputAdapter(protected val connection: Connection) : OutputA
                 RelationalWriteSupport.INNINGS_JDBC_COLUMNS,
                 "insert into"
             ),
-            matchId,
-            inningsNumber,
-            battingTeamId,
-            bowlingTeamId
+            *RelationalWriteSupport.inningsValues(
+                inningsKey = 0,
+                matchId = matchId,
+                inningsNumber = inningsNumber,
+                battingTeamId = battingTeamId,
+                bowlingTeamId = bowlingTeamId,
+                declared = declared
+            ).drop(1).toTypedArray()
         )
         return InningsEntity(key)
     }

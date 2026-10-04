@@ -99,7 +99,7 @@ function presentInnings(innings: ScoresheetInnings): PresentedScoresheetInnings 
     totalRuns,
     totalWickets,
     totalLabel: formatInningsTotal(totalRuns, totalWickets),
-    cardScoreLabel: formatCardScore(totalRuns, totalWickets),
+    cardScoreLabel: formatCardScore(totalRuns, totalWickets, innings.declared),
     oversLabel: formatOvers(deliveries),
     runRateLabel: formatRunRate(totalRuns, deliveries),
     cardFooterLabel: totalWickets >= 10 ? 'All Out' : 'Innings complete'

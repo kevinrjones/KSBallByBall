@@ -3994,3 +3994,39 @@ Add bounded historical match search contracts, API, BFF, and Angular results
 - BFF query encoding, bearer forwarding, search decoding, recent-match
   compatibility, upstream failures, and malformed JSON.
 - Angular search/result route, service, state, accessibility, and build checks.
+
+## Task: Persist declared innings and render scorecard declaration
+
+### Title
+
+Store innings declarations and append `dec` to scorecard card scores
+
+### Date/time completed
+
+2026-10-03 22:21
+
+### What was shipped
+
+- Added a non-null `declared` column with a false default to each dialect's
+  `1__initial_tables.sql` and the generated relational schema.
+- Propagated the parsed declaration through database adapters, jOOQ loading,
+  the shared/API scoresheet contract, and the Angular scorecard presenter.
+- Declared innings now render card scores such as `565/6 dec`.
+
+### Key decisions
+
+- Updated only the authoritative initial schema definitions; no follow-up
+  migration was added.
+- Existing innings rows are updated by the JDBC adapter when replayed, while
+  fresh SQL-script and CSV output includes the declaration in the insert row.
+
+### Gotchas
+
+- Live integration databases must be reapplied from the initial schema before
+  scoresheet queries can select `innings.declared`.
+
+### Test coverage areas
+
+- Database insert coverage verifies declared innings output.
+- API/shared contract and jOOQ mapping checks pass with the new field.
+- Angular presenter coverage verifies `565/6 dec`; full `clean check` passed.

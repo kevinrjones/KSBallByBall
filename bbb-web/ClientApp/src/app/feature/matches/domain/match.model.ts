@@ -103,6 +103,7 @@ export interface ScoresheetInnings {
   readonly inningsNumber: number;
   readonly battingTeam?: string | null;
   readonly bowlingTeam?: string | null;
+  readonly declared: boolean;
   readonly deliveries: readonly ScoresheetDelivery[];
 }
 

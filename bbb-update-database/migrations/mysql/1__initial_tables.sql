@@ -152,6 +152,7 @@ CREATE TABLE innings
     innings_number   INT             NOT NULL,
     batting_team_id  BIGINT UNSIGNED  NOT NULL,
     bowling_team_id  BIGINT UNSIGNED  NOT NULL,
+    declared         BOOLEAN         NOT NULL DEFAULT FALSE,
     UNIQUE KEY uq_innings_match_number (match_id, innings_number),
     KEY idx_innings_batting_team (batting_team_id),
     KEY idx_innings_bowling_team (bowling_team_id),

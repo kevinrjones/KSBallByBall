@@ -43,6 +43,20 @@ import java.util.UUID
 
 class DatabaseTest {
     @Test
+    fun `given a declared innings when written then the innings insert stores declared`() {
+        val sql = writeMatchAndReadSql(
+            cricSheetWithFielder().copy(
+                innings = cricSheetWithFielder().innings.map { it.copy(declared = true) }
+            )
+        )
+
+        expectThat(sql).contains(
+            "INSERT INTO innings (id, match_id, innings_number, batting_team_id, bowling_team_id, declared)"
+        )
+        expectThat(sql).contains("VALUES (1, 1, 1, 1, 2, 1)")
+    }
+
+    @Test
     fun `given a failed match write when writing then the adapter rolls back`() {
         val adapter = FailingMatchOutputAdapter()
 
@@ -321,19 +335,20 @@ class DatabaseTest {
         override fun upsertGround(name: String): Ground = throw IllegalStateException("Simulated match write failure")
         override fun upsertDate(date: java.time.LocalDate): Int = 20240101
         override fun insertMatch(match: MatchRecord): MatchEntity = MatchEntity(1, match.publicMatchId)
-        override fun insertSourceReferences(matchKey: Long, sources: List<SourceReference>) = Unit
+        override fun insertSourceReferences(matchId: Long, sources: List<SourceReference>) = Unit
         override fun upsertInnings(
-            matchKey: Long,
+            matchId: Long,
             inningsNumber: Int,
-            battingTeamKey: Long,
-            bowlingTeamKey: Long
+            battingTeamId: Long,
+            bowlingTeamId: Long,
+            declared: Boolean
         ): InningsEntity = InningsEntity(1)
-        override fun findDeliveryKey(matchKey: Long, inningsKey: Long, inningsOrder: Int): Long? = null
+        override fun findDeliveryKey(matchId: Long, inningsId: Long, inningsOrder: Int): Long? = null
         override fun insertDelivery(delivery: DeliveryRecord): Long = 1
         override fun insertWicket(kind: String): Long = 1
-        override fun insertDeliveryWicket(deliveryKey: Long, wicketKey: Long) = Unit
-        override fun insertDeliveryFielder(deliveryKey: Long, wicketKey: Long, personKey: Long) = Unit
-        override fun insertMatchPerson(matchKey: Long, personKey: Long, roleCode: String) = Unit
+        override fun insertDeliveryWicket(deliveryId: Long, wicketId: Long) = Unit
+        override fun insertDeliveryFielder(deliveryId: Long, wicketId: Long, personId: Long) = Unit
+        override fun insertMatchPerson(matchId: Long, personId: Long, roleCode: String) = Unit
         override fun writeAllPeople(people: Sequence<PersonEntity>) = Unit
         override fun beginMatch() {
             matchStarted = true

@@ -156,18 +156,22 @@ abstract class SqlScriptOutputAdapter(
         matchId: Long,
         inningsNumber: Int,
         battingTeamId: Long,
-        bowlingTeamId: Long
+        bowlingTeamId: Long,
+        declared: Boolean
     ): InningsEntity {
         val lookup = matchId to inningsNumber
         innings[lookup]?.let { return it }
         val result = InningsEntity(nextInningsKey++)
         write(
             RelationalWriteSupport.insertSql("innings", RelationalWriteSupport.INNINGS_COLUMNS),
-            result.id,
-            matchId,
-            inningsNumber,
-            battingTeamId,
-            bowlingTeamId
+            *RelationalWriteSupport.inningsValues(
+                inningsKey = result.id,
+                matchId = matchId,
+                inningsNumber = inningsNumber,
+                battingTeamId = battingTeamId,
+                bowlingTeamId = bowlingTeamId,
+                declared = declared
+            ).toTypedArray()
         )
         innings[lookup] = result
         return result

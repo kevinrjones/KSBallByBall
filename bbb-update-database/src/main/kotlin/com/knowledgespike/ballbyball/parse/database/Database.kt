@@ -96,7 +96,13 @@ class Database(private val outputAdapter: OutputAdapter) {
             val battingTeam = teams.find { it.name == teamNameForMatch(inning.team, cricSheet) }
                 ?: throw InvalidStateException("Unknown batting team: ${inning.team}")
             val bowlingTeam = requireOpposingTeam(teams, battingTeam)
-            val innings = upsertInnings(match.id, inningsIndex + 1, battingTeam.id, bowlingTeam.id)
+            val innings = upsertInnings(
+                match.id,
+                inningsIndex + 1,
+                battingTeam.id,
+                bowlingTeam.id,
+                inning.declared == true
+            )
             val powerplays = calculatePowerplays(inning.powerplays, cricSheet.match.ballsPerOver)
             var deliveryNumber = 0
 
@@ -345,9 +351,16 @@ class Database(private val outputAdapter: OutputAdapter) {
         matchKey: Long,
         inningsNumber: Int,
         battingTeamKey: Long,
-        bowlingTeamKey: Long
+        bowlingTeamKey: Long,
+        declared: Boolean
     ): InningsEntity {
-        return outputAdapter.upsertInnings(matchKey, inningsNumber, battingTeamKey, bowlingTeamKey)
+        return outputAdapter.upsertInnings(
+            matchKey,
+            inningsNumber,
+            battingTeamKey,
+            bowlingTeamKey,
+            declared
+        )
     }
 
     private fun requirePersonKey(sourceId: String?, displayName: String): Long {

@@ -51,6 +51,7 @@ data class MatchScoresheetInnings(
     val inningsNumber: Int,
     val battingTeam: String?,
     val bowlingTeam: String?,
+    val declared: Boolean,
     val deliveries: List<MatchScoresheetDelivery>
 )
 

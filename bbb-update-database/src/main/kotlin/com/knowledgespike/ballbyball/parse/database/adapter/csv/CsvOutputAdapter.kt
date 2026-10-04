@@ -148,7 +148,8 @@ class CsvOutputAdapter(output: Path) : OutputAdapter {
         matchId: Long,
         inningsNumber: Int,
         battingTeamId: Long,
-        bowlingTeamId: Long
+        bowlingTeamId: Long,
+        declared: Boolean
     ): InningsEntity {
         val lookup = matchId to inningsNumber
         innings[lookup]?.let { return it }
@@ -156,7 +157,14 @@ class CsvOutputAdapter(output: Path) : OutputAdapter {
         writeRow(
             "innings",
             RelationalWriteSupport.INNINGS_COLUMNS,
-            listOf(result.id, matchId, inningsNumber, battingTeamId, bowlingTeamId)
+            RelationalWriteSupport.inningsValues(
+                inningsKey = result.id,
+                matchId = matchId,
+                inningsNumber = inningsNumber,
+                battingTeamId = battingTeamId,
+                bowlingTeamId = bowlingTeamId,
+                declared = declared
+            )
         )
         innings[lookup] = result
         return result

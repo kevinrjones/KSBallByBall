@@ -131,6 +131,7 @@ class MatchSearchContractsTest {
                     inningsNumber = 1,
                     battingTeam = "South Africa",
                     bowlingTeam = "India",
+                    declared = false,
                     deliveries = listOf(
                         ScoresheetDelivery(
                             deliveryKey = 100,

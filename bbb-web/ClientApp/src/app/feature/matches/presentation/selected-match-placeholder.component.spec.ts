@@ -439,7 +439,7 @@ function innings(
   bowlingTeam: string,
   ...deliveries: ScoresheetDelivery[]
 ): ScoresheetInnings {
-  return {inningsNumber, battingTeam, bowlingTeam, deliveries};
+  return {inningsNumber, battingTeam, bowlingTeam, declared: false, deliveries};
 }
 
 function delivery(overrides: Partial<ScoresheetDelivery>): ScoresheetDelivery {

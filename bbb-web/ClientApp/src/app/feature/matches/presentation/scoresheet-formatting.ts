@@ -5,11 +5,11 @@ export function formatInningsTotal(totalRuns: number, totalWickets: number): str
   return totalWickets >= 10 ? `${totalRuns} ao` : `${totalRuns}`;
 }
 
-export function formatCardScore(totalRuns: number, totalWickets: number): string {
-  if (totalWickets >= 10) {
-    return `${totalRuns} ao`;
-  }
-  return totalWickets > 0 ? `${totalRuns}/${totalWickets}` : `${totalRuns}`;
+export function formatCardScore(totalRuns: number, totalWickets: number, declared = false): string {
+  const score = totalWickets >= 10
+    ? `${totalRuns} ao`
+    : totalWickets > 0 ? `${totalRuns}/${totalWickets}` : `${totalRuns}`;
+  return declared ? `${score} dec` : score;
 }
 
 export function formatOvers(deliveries: readonly ScoresheetDelivery[]): string {

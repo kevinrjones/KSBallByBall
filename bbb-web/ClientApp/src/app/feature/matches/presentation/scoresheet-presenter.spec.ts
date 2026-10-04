@@ -264,14 +264,26 @@ describe('presentScoresheet', () => {
     expect(presentedInnings.runRateLabel).toBe('36.00');
     expect(presentedInnings.cardFooterLabel).toBe('Innings complete');
   });
+
+  it('should append dec to a declared innings card score', () => {
+    const presentedInnings = presentScoresheet(scoresheetWithDeclared(true,
+      delivery({deliveryKey: 1, batterRuns: 565, totalRuns: 565, wicketCount: 6}),
+    )).innings[0];
+
+    expect(presentedInnings.cardScoreLabel).toBe('565/6 dec');
+  });
 });
 
 function scoresheet(...deliveries: ScoresheetDelivery[]): MatchScoresheetResponse {
+  return scoresheetWithDeclared(false, ...deliveries);
+}
+
+function scoresheetWithDeclared(declared: boolean, ...deliveries: ScoresheetDelivery[]): MatchScoresheetResponse {
   return {
     context: {publicMatchId: 1_000_010_101, fileName: 'match.json', team1: 'England', team2: 'India'},
     completeness: 'COMPLETE',
     missingData: [],
-    innings: [{inningsNumber: 1, battingTeam: 'England', bowlingTeam: 'India', deliveries}]
+    innings: [{inningsNumber: 1, battingTeam: 'England', bowlingTeam: 'India', declared, deliveries}]
   };
 }
 

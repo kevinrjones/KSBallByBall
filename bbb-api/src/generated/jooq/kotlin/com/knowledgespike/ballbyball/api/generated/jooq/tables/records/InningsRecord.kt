@@ -36,6 +36,10 @@ open class InningsRecord() : UpdatableRecordImpl<InningsRecord>(Innings.INNINGS)
         set(value): Unit = set(4, value)
         get(): Long? = get(4) as Long?
 
+    open var declared: Boolean?
+        set(value): Unit = set(5, value)
+        get(): Boolean? = get(5) as Boolean?
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -45,12 +49,13 @@ open class InningsRecord() : UpdatableRecordImpl<InningsRecord>(Innings.INNINGS)
     /**
      * Create a detached, initialised InningsRecord
      */
-    constructor(id: Long? = null, matchId: Long? = null, inningsNumber: Int? = null, battingTeamId: Long? = null, bowlingTeamId: Long? = null): this() {
+    constructor(id: Long? = null, matchId: Long? = null, inningsNumber: Int? = null, battingTeamId: Long? = null, bowlingTeamId: Long? = null, declared: Boolean? = null): this() {
         this.id = id
         this.matchId = matchId
         this.inningsNumber = inningsNumber
         this.battingTeamId = battingTeamId
         this.bowlingTeamId = bowlingTeamId
+        this.declared = declared
         resetTouchedOnNotNull()
     }
 }

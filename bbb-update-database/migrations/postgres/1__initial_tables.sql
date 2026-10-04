@@ -124,6 +124,7 @@ CREATE TABLE innings
     innings_number  INTEGER NOT NULL,
     batting_team_id BIGINT NOT NULL,
     bowling_team_id BIGINT NOT NULL,
+    declared        BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT uq_innings_match_number UNIQUE (match_id, innings_number),
     CONSTRAINT fk_innings_match FOREIGN KEY (match_id) REFERENCES matches (id),
     CONSTRAINT fk_innings_batting_team FOREIGN KEY (batting_team_id) REFERENCES teams (id),

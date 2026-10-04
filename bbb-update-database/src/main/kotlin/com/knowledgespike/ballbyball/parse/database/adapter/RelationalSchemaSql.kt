@@ -113,6 +113,7 @@ internal object RelationalSchemaSql {
             CREATE TABLE innings (
                 id $identity, match_id $matchKey NOT NULL, innings_number $integer NOT NULL,
                 batting_team_id $key NOT NULL, bowling_team_id $key NOT NULL,
+                declared BOOLEAN NOT NULL DEFAULT FALSE,
                 UNIQUE (match_id, innings_number), FOREIGN KEY (match_id) REFERENCES matches (id),
                 FOREIGN KEY (batting_team_id) REFERENCES teams (id), FOREIGN KEY (bowling_team_id) REFERENCES teams (id)
             );
