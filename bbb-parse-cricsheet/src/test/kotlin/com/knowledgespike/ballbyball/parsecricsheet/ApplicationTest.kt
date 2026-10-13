@@ -166,7 +166,6 @@ class ApplicationTest {
         "--base-directory", baseDirectory.toString(),
         "--input", "raw",
         "--output", "parsed",
-        "--not-parsed", "not-parsed",
         "--stats-connection-string", "jdbc:stats",
         "--bbb-connection-string", "jdbc:bbb"
     )

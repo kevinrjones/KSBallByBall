@@ -20,7 +20,7 @@ sealed class IdentityError(val message: String) {
     class InvalidSha256(value: String) : IdentityError("Value must be a lowercase SHA-256 digest: '$value'")
 
     class InvalidSourceCaId(value: String?) :
-        IdentityError("Source CA ID must contain 1 to 10 non-whitespace characters: '$value'")
+        IdentityError("Source CA ID must contain 1 to ${SourceCaId.MAX_LENGTH} non-whitespace characters: '$value'")
 }
 
 @Serializable
@@ -105,7 +105,7 @@ value class SourceCaId private constructor(val value: String) {
         fun of(value: String?): Either<IdentityError.InvalidSourceCaId, SourceCaId> = either { invoke(value) }
 
         fun from(value: String): SourceCaId = requireNotNull(of(value).getOrNull()) {
-            "Source CA ID must contain 1 to 10 non-whitespace characters"
+            "Source CA ID must contain 1 to $MAX_LENGTH non-whitespace characters"
         }
 
         const val MAX_LENGTH = 20

@@ -15,7 +15,7 @@ class SourceCaIdTest {
     @Test
     fun `given blank or overlong source CA identifiers when created then reject them`() {
         val blank = SourceCaId.of(" ")
-        val overlong = SourceCaId.of("ca-12345678")
+        val overlong = SourceCaId.of("x".repeat(SourceCaId.MAX_LENGTH + 1))
 
         expectThat(blank.getOrNull()).isEqualTo(null)
         expectThat(overlong.getOrNull()).isEqualTo(null)

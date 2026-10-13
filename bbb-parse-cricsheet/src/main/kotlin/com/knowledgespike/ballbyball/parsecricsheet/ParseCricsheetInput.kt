@@ -11,7 +11,6 @@ data class ParseCricsheetInput(
     val baseDirectory: Path,
     val inputDirectory: Path,
     val outputDirectory: Path,
-    val notParsedDirectory: Path,
     val statsConnectionString: String,
     val statsUserName: String? = null,
     val statsPasswordEnvironmentVariable: String? = null,
@@ -20,17 +19,16 @@ data class ParseCricsheetInput(
     val bbbPasswordEnvironmentVariable: String? = null
 ) {
     internal val layout: ParseDirectoryLayout =
-        parseDirectoryLayout(inputDirectory, outputDirectory, notParsedDirectory)
+        parseDirectoryLayout(inputDirectory, outputDirectory)
 
     internal companion object {
-        fun fromDirectories(inputDirectory: Path, outputDirectory: Path, notParsedDirectory: Path): ParseCricsheetInput {
+        fun fromDirectories(inputDirectory: Path, outputDirectory: Path): ParseCricsheetInput {
             val baseDirectory = inputDirectory.toAbsolutePath().normalize().parent
                 ?: inputDirectory.toAbsolutePath().normalize()
             return ParseCricsheetInput(
                 baseDirectory = baseDirectory,
                 inputDirectory = inputDirectory,
                 outputDirectory = outputDirectory,
-                notParsedDirectory = notParsedDirectory,
                 statsConnectionString = "",
                 bbbConnectionString = ""
             )
@@ -63,14 +61,6 @@ object ParseCricsheetArguments {
                 .hasArg()
                 .argName("directory")
                 .desc("relative normalized output directory")
-                .get()
-        )
-        addOption(
-            Option.builder("np")
-                .longOpt("not-parsed")
-                .hasArg()
-                .argName("directory")
-                .desc("relative output directory for raw files that could not be parsed")
                 .get()
         )
         addOption(
@@ -136,17 +126,11 @@ object ParseCricsheetArguments {
             commandLine.requiredValue("o", "output"),
             "--output"
         )
-        val notParsedDirectory = childDirectory(
-            baseDirectory,
-            commandLine.requiredValue("np", "not-parsed"),
-            "--not-parsed"
-        )
         return try {
             ParseCricsheetInput(
                 baseDirectory = baseDirectory,
                 inputDirectory = inputDirectory,
                 outputDirectory = outputDirectory,
-                notParsedDirectory = notParsedDirectory,
                 statsConnectionString = commandLine.requiredValue("scs", "stats-connection-string"),
                 statsUserName = commandLine.getOptionValue("stats-user-name"),
                 statsPasswordEnvironmentVariable = commandLine.getOptionValue("stats-password-environment-variable"),

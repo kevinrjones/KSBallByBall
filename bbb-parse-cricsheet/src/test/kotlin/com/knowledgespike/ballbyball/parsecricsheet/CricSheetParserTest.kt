@@ -75,25 +75,25 @@ class CricSheetParserTest {
     }
 
     @Test
-    fun `given a file changes from failure to success then only parsed output remains`() {
+    fun `given a stats lookup throws then normalized output is retained and success replaces it`() {
         val root = Files.createTempDirectory("parse-cricsheet-routing")
         val input = root.resolve("input")
         val parsed = root.resolve("parsed")
-        val notParsed = root.resolve("not-parsed")
         Files.createDirectories(input)
         Files.writeString(input.resolve("12345.json"), sourceDocument())
 
-        CricSheetParser(matchLinker = MatchLinker { error("lookup failed") })
-            .parse(input, parsed, notParsed)
-        expectThat(Files.exists(notParsed.resolve("12345.json"))).isEqualTo(true)
-        expectThat(Files.exists(parsed.resolve("12345.json"))).isEqualTo(false)
+        val failed = CricSheetParser(matchLinker = MatchLinker { error("lookup failed") })
+            .parse(input, parsed)
+        expectThat(failed.succeeded).isEqualTo(false)
+        expectThat(Files.exists(parsed.resolve("12345.json"))).isEqualTo(true)
+        val unlinked = json.decodeFromString<CanonicalMatchEnvelope>(Files.readString(parsed.resolve("12345.json")))
+        expectThat(unlinked.match.match.sourceCaId).isEqualTo(null)
 
         val success = CricSheetParser(matchLinker = MatchLinker { StatsLinkResult.Linked(SourceCaId.from("ca-12345")) })
-            .parse(input, parsed, notParsed)
+            .parse(input, parsed)
 
         expectThat(success.succeeded).isEqualTo(true)
         expectThat(Files.exists(parsed.resolve("12345.json"))).isEqualTo(true)
-        expectThat(Files.exists(notParsed.resolve("12345.json"))).isEqualTo(false)
     }
 
     @Test
@@ -103,10 +103,10 @@ class CricSheetParserTest {
         Files.createDirectories(input)
 
         assertThrows<IllegalArgumentException> {
-            CricSheetParser(matchLinker = noOpMatchLinker).parse(input, input, root.resolve("not-parsed"))
+            CricSheetParser(matchLinker = noOpMatchLinker).parse(input, input)
         }
 
-        expectThat(Files.exists(root.resolve("not-parsed"))).isEqualTo(false)
+        expectThat(Files.exists(input.resolve("12345.json"))).isEqualTo(false)
     }
 
     @Test
@@ -117,7 +117,7 @@ class CricSheetParserTest {
         Files.createDirectories(input)
 
         assertThrows<IllegalArgumentException> {
-            CricSheetParser(matchLinker = noOpMatchLinker).parse(input, output, root.resolve("not-parsed"))
+            CricSheetParser(matchLinker = noOpMatchLinker).parse(input, output)
         }
 
         expectThat(Files.exists(output)).isEqualTo(false)
@@ -147,25 +147,19 @@ class CricSheetParserTest {
         Files.createDirectories(root.resolve("input"))
         Files.writeString(root.resolve("input/100.json"), sourceDocument(matchType = "Unknown"))
         Files.writeString(root.resolve("input/101.json"), sourceDocument(matchType = "T20"))
-        val notParsed = root.resolve("not-parsed")
-
         val result = CricSheetParser(matchLinker = noOpMatchLinker)
-            .parse(root.resolve("input"), root.resolve("output"), notParsed)
+            .parse(root.resolve("input"), root.resolve("output"))
 
         expectThat(result.failures.map { it.input.fileName.toString() }).isEqualTo(listOf("100.json"))
         expectThat(Files.exists(root.resolve("output/101.json"))).isEqualTo(true)
         expectThat(Files.exists(root.resolve("output/100.json"))).isEqualTo(false)
-        expectThat(Files.readString(notParsed.resolve("100.json"))).isEqualTo(
-            Files.readString(root.resolve("input/100.json"))
-        )
     }
 
     @Test
-    fun `given a missing stats match when parsed then raw file is retained and later files continue`() {
+    fun `given a missing stats match when parsed then unlinked output is saved and later files continue`() {
         val root = Files.createTempDirectory("parse-cricsheet-missing-match")
         val input = root.resolve("input")
         val parsed = root.resolve("parsed")
-        val notParsed = root.resolve("not-parsed")
         Files.createDirectories(input)
         Files.writeString(input.resolve("100.json"), sourceDocument(eventName = "Synthetic League"))
         Files.writeString(input.resolve("101.json"), sourceDocument(eventName = "Synthetic League"))
@@ -188,17 +182,16 @@ class CricSheetParserTest {
                     StatsLinkResult.Linked(SourceCaId.from("ca-101"))
                 }
             }
-        ).parse(input, parsed, notParsed)
+        ).parse(input, parsed)
 
         expectThat(calls).isEqualTo(2)
         expectThat(result.failures.map { it.input.fileName.toString() }).isEqualTo(listOf("100.json"))
         expectThat(result.failures.single().message)
             .isEqualTo("No stats match found for source \"Team A\" vs source \"Team B\" on 2024-01-01 with margin 0")
         expectThat(Files.exists(parsed.resolve("101.json"))).isEqualTo(true)
-        expectThat(Files.exists(parsed.resolve("100.json"))).isEqualTo(false)
-        expectThat(Files.readString(notParsed.resolve("100.json"))).isEqualTo(
-            Files.readString(input.resolve("100.json"))
-        )
+        expectThat(Files.exists(parsed.resolve("100.json"))).isEqualTo(true)
+        val unlinked = json.decodeFromString<CanonicalMatchEnvelope>(Files.readString(parsed.resolve("100.json")))
+        expectThat(unlinked.match.match.sourceCaId).isEqualTo(null)
     }
 
     @Test
@@ -278,7 +271,6 @@ class CricSheetParserTest {
         val root = Files.createTempDirectory("parse-cricsheet-policy")
         val input = root.resolve("input")
         val parsed = root.resolve("parsed")
-        val notParsed = root.resolve("not-parsed")
         Files.createDirectories(input)
         Files.writeString(input.resolve("12345.json"), sourceDocument(eventName = eventName, season = season))
 
@@ -291,19 +283,17 @@ class CricSheetParserTest {
                 secondTeam: StatsTeamLookup
             ): List<SourceCaId> = error("Stats lookup should not be attempted")
         })
-        val result = CricSheetParser(matchLinker = matchLinker).parse(input, parsed, notParsed)
+        val result = CricSheetParser(matchLinker = matchLinker).parse(input, parsed)
         val envelope = json.decodeFromString<CanonicalMatchEnvelope>(Files.readString(parsed.resolve("12345.json")))
 
         expectThat(result.succeeded).isEqualTo(true)
         expectThat(envelope.match.match.sourceCaId).isEqualTo(null)
-        expectThat(Files.exists(notParsed.resolve("12345.json"))).isEqualTo(false)
     }
 
     private fun assertStatsLookupAttempted(eventName: String, season: String) {
         val root = Files.createTempDirectory("parse-cricsheet-policy-control")
         val input = root.resolve("input")
         val parsed = root.resolve("parsed")
-        val notParsed = root.resolve("not-parsed")
         Files.createDirectories(input)
         Files.writeString(input.resolve("12345.json"), sourceDocument(eventName = eventName, season = season))
 
@@ -316,11 +306,13 @@ class CricSheetParserTest {
                 secondTeam: StatsTeamLookup
             ): List<SourceCaId> = error("Stats lookup attempted")
         })
-        val result = CricSheetParser(matchLinker = matchLinker).parse(input, parsed, notParsed)
+        val result = CricSheetParser(matchLinker = matchLinker).parse(input, parsed)
 
         expectThat(result.succeeded).isEqualTo(false)
         expectThat(result.failures.single().message).isEqualTo("Stats lookup attempted")
-        expectThat(Files.exists(notParsed.resolve("12345.json"))).isEqualTo(true)
+        expectThat(Files.exists(parsed.resolve("12345.json"))).isEqualTo(true)
+        val envelope = json.decodeFromString<CanonicalMatchEnvelope>(Files.readString(parsed.resolve("12345.json")))
+        expectThat(envelope.match.match.sourceCaId).isEqualTo(null)
     }
 
     private fun parseLinkFailure(linkResult: StatsLinkResult): ParseFailure {
@@ -329,19 +321,16 @@ class CricSheetParserTest {
         Files.createDirectories(input)
         Files.writeString(input.resolve("12345.json"), sourceDocument())
 
-        return CricSheetParser(matchLinker = MatchLinker { linkResult })
-            .parse(input, root.resolve("parsed"), root.resolve("not-parsed"))
-            .failures
-            .single()
+        val parsed = root.resolve("parsed")
+        val result = CricSheetParser(matchLinker = MatchLinker { linkResult }).parse(input, parsed)
+        val envelope = json.decodeFromString<CanonicalMatchEnvelope>(Files.readString(parsed.resolve("12345.json")))
+
+        expectThat(envelope.match.match.sourceCaId).isEqualTo(null)
+        return result.failures.single()
     }
 
-    private fun CricSheetParser.parse(
-        inputDirectory: Path,
-        outputDirectory: Path,
-        notParsedDirectory: Path = outputDirectory.resolveSibling("not-parsed")
-    ): ParseResult = parse(
-        ParseCricsheetInput.fromDirectories(inputDirectory, outputDirectory, notParsedDirectory)
-    )
+    private fun CricSheetParser.parse(inputDirectory: Path, outputDirectory: Path): ParseResult =
+        parse(ParseCricsheetInput.fromDirectories(inputDirectory, outputDirectory))
 
     companion object {
         @JvmStatic

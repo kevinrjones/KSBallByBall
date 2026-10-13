@@ -177,7 +177,7 @@ before running the command:
 ```bash
 ./gradlew :bbb-parse-cricsheet:run --no-daemon \
   --args="--base-directory $CRICSHEET_ROOT --input $CRICSHEET_RAW \
-    --output parsed --not-parsed not-parsed --stats-connection-string $STATS_DB_URL \
+    --output parsed --stats-connection-string $STATS_DB_URL \
     --stats-user-name $STATS_DB_USER --stats-password-environment-variable STATS_DB_PASSWORD \
     --bbb-connection-string $BBB_DB_URL --bbb-user-name $BBB_DB_USER \
     --bbb-password-environment-variable BBB_DB_PASSWORD"
@@ -210,7 +210,7 @@ Normalize the full downloaded Cricsheet JSON into the shared schema:
 ```bash
 ./gradlew :bbb-parse-cricsheet:run --no-daemon \
   --args="--base-directory $CRICSHEET_ROOT --input $CRICSHEET_RAW \
-    --output $CRICSHEET_DATA --not-parsed not-parsed --stats-connection-string $STATS_DB_URL \
+    --output $CRICSHEET_DATA --stats-connection-string $STATS_DB_URL \
     --stats-user-name $STATS_DB_USER --stats-password-environment-variable STATS_DB_PASSWORD \
     --bbb-connection-string $BBB_DB_URL --bbb-user-name $BBB_DB_USER \
     --bbb-password-environment-variable BBB_DB_PASSWORD"
@@ -267,11 +267,13 @@ Competition` matches in season `2014/15` receive the same treatment; other
 seasons continue through normal stats linking. `Nepal Premier League` matches
 receive the same treatment in all seasons.
 The resulting `Matches.CaId` is written to the optional integration field
-`match.sourceCaId` and later to `matches.source_ca_id`. Successful normalized files are written below the
-`--output` directory. Any conversion, linking, or output error is logged
-immediately, accumulated, and does not stop the remaining files; the original
-raw file is copied to the matching relative path below `--not-parsed`. A final
-error summary is logged and the parser exits non-zero when any file failed.
+`match.sourceCaId` and later to `matches.source_ca_id`. Every successfully
+converted file is written below the `--output` directory, even if stats linking
+fails; an unlinked envelope has a null `sourceCaId`. Lookup failures are logged
+immediately, accumulated, and do not stop the remaining files. Conversion and
+output failures are also reported and processing continues, but cannot produce
+a normalized file. A final error summary is logged and the parser exits
+non-zero when any file failed.
 Lookup-specific failures, including the margin retry, are written to both the
 console and `logs/lookup_failures.log`; that file uses the same 10 MB rotation,
 60-day history, and 20 GB total-size cap as `logs/application.log`.
@@ -279,7 +281,6 @@ console and `logs/lookup_failures.log`; that file uses the same 10 MB rotation,
 ```bash
 ./gradlew :bbb-parse-cricsheet:run --no-daemon \
   --args="--base-directory /path/to/data --input cricsheet --output parsed \
-    --not-parsed not-parsed \
     --stats-connection-string jdbc:mariadb://localhost:3306/stats \
     --stats-user-name stats --stats-password-environment-variable STATS_DB_PASSWORD \
     --bbb-connection-string jdbc:mariadb://localhost:3306/cricsheet \
@@ -314,14 +315,15 @@ discovered `sourceCaId` into an existing warehouse row through the JDBC,
 SQL-script, and CSV adapters, while conflicting IDs fail with an actionable
 error.
 
-The base directory must be absolute, while `--input`, `--output`, and
-`--not-parsed` are safe relative child directories. Every `.json` file below
-the input directory is processed recursively and its relative path is mirrored
-below either the parsed output directory or the not-parsed raw-file directory.
-Existing managed parsed files and failed raw files are replaced; stale and
-unrelated output files remain. Invalid files are reported immediately and in a
-final accumulated summary after the remaining files are attempted. The command
-returns a non-zero status if any file failed.
+The base directory must be absolute, while `--input` and `--output` are safe
+relative child directories. Every `.json` file below the input directory is
+processed recursively and its relative path is mirrored below the parsed
+output directory. Successfully converted matches are saved there regardless
+of stats-link success; lookup failures leave `sourceCaId` null and are reported
+in the final non-zero result. Conversion or output failures remove stale parsed
+output for that source when possible. Unrelated output files remain. Invalid
+files are reported immediately and in a final accumulated summary after the
+remaining files are attempted.
 
 Check dependency updates and refresh the version catalog when required:
 

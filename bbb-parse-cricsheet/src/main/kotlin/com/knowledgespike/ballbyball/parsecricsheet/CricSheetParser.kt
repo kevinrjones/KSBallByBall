@@ -33,18 +33,15 @@ class CricSheetParser(
         val layout = input.layout
         val normalizedInputDirectory = layout.input
         val normalizedOutputDirectory = layout.output
-        val normalizedNotParsedDirectory = layout.notParsed
         log.info(
-            "Starting Cricsheet parsing from {} into parsed {} and not-parsed {}",
+            "Starting Cricsheet parsing from {} into parsed {}",
             normalizedInputDirectory,
-            normalizedOutputDirectory,
-            normalizedNotParsedDirectory
+            normalizedOutputDirectory
         )
         require(Files.isDirectory(normalizedInputDirectory)) {
             "Input directory does not exist: $normalizedInputDirectory"
         }
         Files.createDirectories(normalizedOutputDirectory)
-        Files.createDirectories(normalizedNotParsedDirectory)
 
         val inputs = jsonFiles(normalizedInputDirectory)
         log.info("Found {} Cricsheet JSON files in {}", inputs.size, normalizedInputDirectory)
@@ -71,51 +68,60 @@ class CricSheetParser(
 
     private fun processFile(input: Path, layout: ParseDirectoryLayout): ParseFailure? {
         val output = layout.output.resolve(layout.input.relativize(input))
-        return try {
-            log.debug("Parsing {} into {}", input, output)
-            val sourceEnvelope = converter.convert(
+        log.debug("Parsing {} into {}", input, output)
+        val sourceEnvelope = try {
+            converter.convert(
                 rawBytes = Files.readAllBytes(input),
                 providerRecordKey = input.nameWithoutExtension
             )
-            val linkedEnvelope = when (val linkResult = linkMatch(sourceEnvelope, input)) {
-                is Either.Left -> return preserveFailedFile(input, output, layout, linkResult.value.message)
-                is Either.Right -> linkResult.value
-            }
-            val canonicalEnvelope = SingleSourceCanonicalizer.canonicalize(linkedEnvelope)
-            writeAtomically(output, outputJson.encodeToString(canonicalEnvelope))
-            removeStaleFile(notParsedOutput(input, layout.input, layout.notParsed))
-            log.debug("Wrote normalized match data to {}", output)
-            null
         } catch (exception: Exception) {
-            preserveFailedFile(
-                input,
-                output,
-                layout,
-                exception.message ?: exception::class.simpleName.orEmpty(),
-                exception
-            )
+            return failureWithoutOutput(input, output, exception)
+        }
+
+        val linkResult = try {
+            linkMatch(sourceEnvelope, input)
+        } catch (exception: Exception) {
+            log.error("Unable to link stats match for {}: {}", input, exception.message, exception)
+            Either.Left(ParseFailure(input, exception.message ?: exception::class.simpleName.orEmpty()))
+        }
+        val linkFailure: ParseFailure?
+        val envelopeToWrite: SourceMatchEnvelope
+        when (linkResult) {
+            is Either.Left -> {
+                linkFailure = linkResult.value
+                log.error("Unable to link stats match for {}: {}", input, linkFailure.message)
+                envelopeToWrite = sourceEnvelope.withSourceCaId(null)
+            }
+
+            is Either.Right -> {
+                linkFailure = null
+                envelopeToWrite = linkResult.value
+            }
+        }
+
+        return try {
+            val canonicalEnvelope = SingleSourceCanonicalizer.canonicalize(envelopeToWrite)
+            writeAtomically(output, outputJson.encodeToString(canonicalEnvelope))
+            log.debug("Wrote normalized match data to {}", output)
+            linkFailure
+        } catch (exception: Exception) {
+            val failure = failureWithoutOutput(input, output, exception)
+            linkFailure?.let { failure.copy(message = "${it.message}; ${failure.message}") } ?: failure
         }
     }
 
-    private fun preserveFailedFile(
+    private fun failureWithoutOutput(
         input: Path,
         output: Path,
-        layout: ParseDirectoryLayout,
-        failureMessage: String,
-        exception: Exception? = null
+        exception: Exception
     ): ParseFailure {
-        val failure = ParseFailure(input, failureMessage)
-        if (exception == null) {
-            log.error("Unable to parse {}: {}", input, failure.message)
-        } else {
-            log.error("Unable to parse {}: {}", input, failure.message, exception)
-        }
+        val failure = ParseFailure(input, exception.message ?: exception::class.simpleName.orEmpty())
+        log.error("Unable to parse {}: {}", input, failure.message, exception)
         val cleanupFailure = runCatching { removeStaleFile(output) }.exceptionOrNull()
         cleanupFailure?.let { log.error("Unable to remove stale parsed output {}", output, it) }
-        val preservedMessage = preserveRawFile(input, layout.input, layout.notParsed, failure.message)
         return failure.copy(
-            message = cleanupFailure?.let { "$preservedMessage; unable to remove parsed output: ${it.message}" }
-                ?: preservedMessage
+            message = cleanupFailure?.let { "${failure.message}; unable to remove parsed output: ${it.message}" }
+                ?: failure.message
         )
     }
 
@@ -143,25 +149,6 @@ class CricSheetParser(
         match = match.copy(match = match.match.copy(sourceCaId = sourceCaId))
     )
 
-    private fun preserveRawFile(
-        input: Path,
-        inputDirectory: Path,
-        notParsedDirectory: Path,
-        failureMessage: String
-    ): String {
-        val rawOutput = notParsedOutput(input, inputDirectory, notParsedDirectory)
-        return try {
-            Files.createDirectories(rawOutput.parent)
-            Files.copy(input, rawOutput, REPLACE_EXISTING)
-            failureMessage
-        } catch (copyException: Exception) {
-            log.error("Unable to preserve raw file {} at {}: {}", input, rawOutput, copyException.message, copyException)
-            "$failureMessage; unable to preserve raw file: ${copyException.message ?: copyException::class.simpleName}"
-        }
-    }
-
-    private fun notParsedOutput(input: Path, inputDirectory: Path, notParsedDirectory: Path): Path =
-        notParsedDirectory.resolve(inputDirectory.relativize(input))
 
     private fun removeStaleFile(path: Path) {
         Files.deleteIfExists(path)

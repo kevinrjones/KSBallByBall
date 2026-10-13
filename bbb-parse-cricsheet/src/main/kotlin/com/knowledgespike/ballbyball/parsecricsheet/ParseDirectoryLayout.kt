@@ -5,23 +5,18 @@ import java.nio.file.Path
 
 internal data class ParseDirectoryLayout(
     val input: Path,
-    val output: Path,
-    val notParsed: Path
+    val output: Path
 )
 
 internal fun parseDirectoryLayout(
     inputDirectory: Path,
-    outputDirectory: Path,
-    notParsedDirectory: Path
+    outputDirectory: Path
 ): ParseDirectoryLayout {
     val layout = ParseDirectoryLayout(
         input = resolvePhysicalPath(inputDirectory),
-        output = resolvePhysicalPath(outputDirectory),
-        notParsed = resolvePhysicalPath(notParsedDirectory)
+        output = resolvePhysicalPath(outputDirectory)
     )
     requireDisjoint("input", layout.input, "output", layout.output)
-    requireDisjoint("input", layout.input, "not-parsed", layout.notParsed)
-    requireDisjoint("output", layout.output, "not-parsed", layout.notParsed)
     return layout
 }
 

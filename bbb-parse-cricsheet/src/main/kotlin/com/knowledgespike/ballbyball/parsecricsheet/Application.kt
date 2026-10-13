@@ -43,10 +43,9 @@ object Application {
         } else {
             val input = ParseCricsheetArguments.parse(args)
             log.info(
-                "Parsing Cricsheet JSON from {} into parsed {} and not-parsed {}",
+                "Parsing Cricsheet JSON from {} into parsed {}",
                 input.inputDirectory,
-                input.outputDirectory,
-                input.notParsedDirectory
+                input.outputDirectory
             )
             val result = connectionFactory.open(
                 input.statsConnectionString,

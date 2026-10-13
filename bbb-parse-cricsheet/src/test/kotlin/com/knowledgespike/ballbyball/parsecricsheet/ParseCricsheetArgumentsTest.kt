@@ -13,21 +13,16 @@ class ParseCricsheetArgumentsTest {
     fun `given parser paths when parsed then directories resolve beneath base`() {
         val input = ParseCricsheetArguments.parse(
             arrayOf(
-                "-bd", "/tmp/cricsheet", "-i", "raw", "-o", "parsed", "-np", "not-parsed",
+                "-bd", "/tmp/cricsheet", "-i", "raw", "-o", "parsed",
                 "--stats-connection-string", "jdbc:stats", "--bbb-connection-string", "jdbc:bbb"
             )
         )
 
-        expectThat(input).isEqualTo(
-            ParseCricsheetInput(
-                baseDirectory = Path.of("/tmp/cricsheet"),
-                inputDirectory = Path.of("/tmp/cricsheet/raw"),
-                outputDirectory = Path.of("/tmp/cricsheet/parsed"),
-                notParsedDirectory = Path.of("/tmp/cricsheet/not-parsed"),
-                statsConnectionString = "jdbc:stats",
-                bbbConnectionString = "jdbc:bbb"
-            )
-        )
+        expectThat(input.baseDirectory).isEqualTo(Path.of("/tmp/cricsheet"))
+        expectThat(input.inputDirectory).isEqualTo(Path.of("/tmp/cricsheet/raw"))
+        expectThat(input.outputDirectory).isEqualTo(Path.of("/tmp/cricsheet/parsed"))
+        expectThat(input.statsConnectionString).isEqualTo("jdbc:stats")
+        expectThat(input.bbbConnectionString).isEqualTo("jdbc:bbb")
     }
 
     @Test
@@ -37,7 +32,6 @@ class ParseCricsheetArgumentsTest {
                 "--base-directory", "/tmp/cricsheet",
                 "--input", "raw",
                 "--output", "parsed",
-                "--not-parsed", "not-parsed",
                 "--stats-connection-string", "jdbc:postgresql://stats/database",
                 "--stats-user-name", "stats-user",
                 "--stats-password-environment-variable", "STATS_DB_PASSWORD",
@@ -61,7 +55,7 @@ class ParseCricsheetArgumentsTest {
             ParseCricsheetArguments.parse(
                 arrayOf(
                     "--base-directory", "/tmp/cricsheet", "--input", "../raw",
-                    "--output", "normalized", "--not-parsed", "not-parsed"
+                    "--output", "normalized"
                 )
             )
         }
@@ -73,7 +67,7 @@ class ParseCricsheetArgumentsTest {
             ParseCricsheetArguments.parse(
                 arrayOf(
                     "--base-directory", "/tmp/cricsheet", "--input", "raw",
-                    "--output", "raw/parsed", "--not-parsed", "not-parsed",
+                    "--output", "raw/parsed",
                     "--stats-connection-string", "jdbc:stats", "--bbb-connection-string", "jdbc:bbb"
                 )
             )
@@ -90,7 +84,7 @@ class ParseCricsheetArgumentsTest {
             ParseCricsheetArguments.parse(
                 arrayOf(
                     "--base-directory", root.toString(), "--input", "raw",
-                    "--output", "parsed", "--not-parsed", "not-parsed",
+                    "--output", "parsed",
                     "--stats-connection-string", "jdbc:stats", "--bbb-connection-string", "jdbc:bbb"
                 )
             )
@@ -107,7 +101,7 @@ class ParseCricsheetArgumentsTest {
             ParseCricsheetArguments.parse(
                 arrayOf(
                     "--base-directory", root.toString(), "--input", "raw",
-                    "--output", "parsed", "--not-parsed", "not-parsed",
+                    "--output", "parsed",
                     "--stats-connection-string", "jdbc:stats", "--bbb-connection-string", "jdbc:bbb"
                 )
             )
@@ -120,7 +114,7 @@ class ParseCricsheetArgumentsTest {
             ParseCricsheetArguments.parse(
                 arrayOf(
                     "--base-directory", "/tmp/cricsheet", "--input", "raw",
-                    "--output", "parsed", "--not-parsed", "not-parsed",
+                    "--output", "parsed",
                     "--stats-connection-string", "jdbc:stats"
                 )
             )

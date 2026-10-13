@@ -55,7 +55,7 @@ bbb-get-cricsheet-data
 bbb-parse-cricsheet
         │
         ▼
-  parsed/ and not-parsed/ outputs
+  parsed/ normalized envelopes
         │
         ├─ current: single-source canonicalizer
         └─ future: multi-provider reconciliation app
@@ -76,14 +76,15 @@ bbb-api  ──proxied by──▶  bbb-web (Angular)
 Relational loading accepts **canonical envelopes only**. Cross-provider
 reconciliation is intentionally a separate future application.
 
-`bbb-parse-cricsheet` writes successful normalized envelopes below its parsed
-output directory. Per-file conversion, linking, and output errors are logged
-immediately while processing continues; the original failed raw JSON is copied
-to the matching path below the configured not-parsed directory, followed by an
-accumulated error summary and a non-zero result. Expected stats-link outcomes
-are represented as sealed values and mapped at the per-file boundary. Female
-aliases use raw Cricsheet team names; stats-name suffixes and link exclusions
-are owned by their policy resources, linked below.
+`bbb-parse-cricsheet` writes normalized envelopes below its parsed output
+directory whenever conversion succeeds, including when stats lookup fails; in
+that case `match.sourceCaId` remains `null`. Lookup failures are reported per
+file, processing continues, and the command returns non-zero after the
+accumulated error summary. Conversion or output failures are also reported and
+do not stop remaining files. Expected stats-link outcomes are represented as
+sealed values and mapped at the per-file boundary. Female aliases use raw
+Cricsheet team names; stats-name suffixes and link exclusions are owned by
+their policy resources, linked below.
 Match-link failures show the source alias key and include the stats team name
 when policy changes it. Cricsheet input is decoded once into typed source DTOs
 and explicitly mapped into the shared match contract. A durable-commit failure
