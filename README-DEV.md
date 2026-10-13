@@ -29,6 +29,15 @@ export DB_PORT=3306
 export DB_NAME=cricsheet
 export DB_USER=cricsheet
 export DB_PASSWORD='change-me'
+export STATS_DB_HOST=localhost
+export STATS_DB_PORT=3306
+export STATS_DB_NAME=stats
+export STATS_DB_URL="jdbc:mariadb://${STATS_DB_HOST}:${STATS_DB_PORT}/${STATS_DB_NAME}"
+export STATS_DB_USER=stats
+export STATS_DB_PASSWORD='change-me'
+export BBB_DB_URL="jdbc:mariadb://${DB_HOST}:${DB_PORT}/${DB_NAME}"
+export BBB_DB_USER=$DB_USER
+export BBB_DB_PASSWORD='change-me'
 ```
 
 ## Build and verify
@@ -168,7 +177,10 @@ before running the command:
 ```bash
 ./gradlew :bbb-parse-cricsheet:run --no-daemon \
   --args="--base-directory $CRICSHEET_ROOT --input $CRICSHEET_RAW \
-    --output normalized-nightly"
+    --output parsed --not-parsed not-parsed --stats-connection-string $STATS_DB_URL \
+    --stats-user-name $STATS_DB_USER --stats-password-environment-variable STATS_DB_PASSWORD \
+    --bbb-connection-string $BBB_DB_URL --bbb-user-name $BBB_DB_USER \
+    --bbb-password-environment-variable BBB_DB_PASSWORD"
 ```
 
 ### `applications [:bb-web:run]`
@@ -198,32 +210,118 @@ Normalize the full downloaded Cricsheet JSON into the shared schema:
 ```bash
 ./gradlew :bbb-parse-cricsheet:run --no-daemon \
   --args="--base-directory $CRICSHEET_ROOT --input $CRICSHEET_RAW \
-    --output $CRICSHEET_DATA"
+    --output $CRICSHEET_DATA --not-parsed not-parsed --stats-connection-string $STATS_DB_URL \
+    --stats-user-name $STATS_DB_USER --stats-password-environment-variable STATS_DB_PASSWORD \
+    --bbb-connection-string $BBB_DB_URL --bbb-user-name $BBB_DB_USER \
+    --bbb-password-environment-variable BBB_DB_PASSWORD"
 ```
 
 ## Normalize Cricsheet data
 
 `bbb-parse-cricsheet` is the Cricsheet source adapter. It reads raw Cricsheet
 JSON and writes one versioned `CanonicalMatchEnvelope` per input file. Each
-envelope contains the source-neutral `BbbMatchData`, a provider-scoped UUIDv5,
+envelope contains `BbbMatchData`; `match.sourceCaId` is an optional,
+CricketArchive-specific lookup result and is `null` when no provider match is
+found, rather than a source-neutral identity field. It also contains a provider-scoped UUIDv5,
 an exact-byte SHA-256 digest, and explicit single-source merge evidence. The
 safe basename stem is the Cricsheet provider key, so names such as
 `wi_201706.json` are supported; parent directories do not affect identity. The
 parser maps supported formats to warehouse values such as `tt`, `wtt`, `a`, and
 `wa`.
 
+Parsing requires connections to both the CricketArchive stats database and the
+ball-by-ball database that owns the persistent aliases. Each match is first
+matched by the two team names, first match date, and victory margin
+(`Matches.HowMuch`); victory type is intentionally not used. If exact names do
+not resolve a match, configured Cricsheet aliases are applied to one or both
+teams and the same date, margin, and interchangeable-team lookup is retried. If
+the margin-constrained lookup still finds no match, the parser retries with the
+same date and interchangeable teams without `Matches.HowMuch`; duplicate stats
+rows are accepted only when they identify one distinct `CaId`, while multiple
+distinct candidates, missing matches, and invalid alias targets remain failures
+rather than being guessed.
+For female matches, ` Women` is normally appended to team names for stats
+matching; Charlotte Edwards Cup, Rachael Heyhoe Flint Trophy, and Women's T20
+Challenge Match matches are exceptions because their source team names already
+match the stats naming convention. Female matches involving `The Blaze` leave
+that team unsuffixed while the opponent continues to receive ` Women` when required. Matches with the exact event names `ICC World Cricket League
+Europe Region Division Two Twenty20` and `Kenya T20 Quadrangular Series` have
+no stats representation, so they skip the lookup, retain an empty
+`sourceCaId`, and are still written below `--output`. `East Asia Cup` matches
+in seasons `2016/17` and `2018`, `ICC World Twenty20 Asia Region Qualifier A`, `ICC World
+Twenty20 Africa Region Qualifier A`, `ICC World Twenty20 Africa Region
+Qualifier B`, `ICC World Twenty20 East Asia-Pacific Region Qualifier A`, and
+`ICC World Twenty20 East Asia-Pacific Region Qualifier B` matches receive the
+same treatment. `ICC World Twenty20 Europe Region Qualifier A` and `ICC World
+Twenty20 Europe Region Qualifier B`, `ICC World Twenty20 Europe Region
+Qualifier C`, `ICC World Twenty20 Americas Sub Regional Qualifier A`, and `ICC
+World Twenty20 Asia Region Qualifier B` matches receive the same treatment;
+other East Asia Cup seasons continue through normal stats linking. `ICC World
+Twenty20 Africa Region Qualifier C` matches in season `2018/19`, `ICC World
+Cricket League Americas Region Division One Twenty20` matches in season `2010`,
+and `ACC Twenty20 Cup` matches in season `2014/15` receive the same treatment.
+`Stan Nagaiah Trophy` matches receive the same treatment in all seasons.
+`Continental Cup` matches receive the same treatment in all seasons. `Major
+League Cricket` matches in season `2023` and `Asian Games Men's Cricket
+Competition` matches in season `2014/15` receive the same treatment; other
+seasons continue through normal stats linking. `Nepal Premier League` matches
+receive the same treatment in all seasons.
+The resulting `Matches.CaId` is written to the optional integration field
+`match.sourceCaId` and later to `matches.source_ca_id`. Successful normalized files are written below the
+`--output` directory. Any conversion, linking, or output error is logged
+immediately, accumulated, and does not stop the remaining files; the original
+raw file is copied to the matching relative path below `--not-parsed`. A final
+error summary is logged and the parser exits non-zero when any file failed.
+Lookup-specific failures, including the margin retry, are written to both the
+console and `logs/lookup_failures.log`; that file uses the same 10 MB rotation,
+60-day history, and 20 GB total-size cap as `logs/application.log`.
+
 ```bash
 ./gradlew :bbb-parse-cricsheet:run --no-daemon \
-  --args="--base-directory /path/to/data --input cricsheet --output normalized"
+  --args="--base-directory /path/to/data --input cricsheet --output parsed \
+    --not-parsed not-parsed \
+    --stats-connection-string jdbc:mariadb://localhost:3306/stats \
+    --stats-user-name stats --stats-password-environment-variable STATS_DB_PASSWORD \
+    --bbb-connection-string jdbc:mariadb://localhost:3306/cricsheet \
+    --bbb-user-name cricsheet --bbb-password-environment-variable BBB_DB_PASSWORD"
 ```
 
-The base directory must be absolute, while `--input` and `--output` are safe
-relative child directories. Every `.json` file below the input directory is
-processed recursively and its relative path is mirrored below the output
-directory. Existing managed output files are atomically replaced; stale and
-unrelated output files remain. Invalid files are reported after the remaining
-files are attempted, and the command returns a non-zero status if any file
-failed.
+When a source name needs correction, add a reusable alias to the ball-by-ball
+database after checking the target in the stats database:
+
+```sql
+SELECT Id, TeamId, Name FROM Teams WHERE TeamId = 123;
+
+INSERT INTO team_name_aliases (source_system, source_team_name, stats_team_id)
+VALUES ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Comilla Warriors', 123);
+```
+
+For Cricsheet, `source_system` must be the provider namespace UUID
+`f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b`.
+
+The dialect's `1__initial_tables.sql` migration creates the alias table, its
+unique `(source_system, source_team_name, stats_team_id)` index, and the
+source-match uniqueness constraint before aliases are inserted. The target must
+resolve to exactly one stats `Teams.TeamId`; the parser never creates or guesses
+aliases. Multiple rows with the same `source_team_name` are supported;
+the parser validates and tries every target until a match is found. After
+inserting the mappings, rerun the same parser command so the failed match is
+retried with the persisted aliases.
+
+The initial migration is schema-only; operator-owned alias rows are deliberately
+not embedded in migrations. Re-importing a canonical envelope reconciles a newly
+discovered `sourceCaId` into an existing warehouse row through the JDBC,
+SQL-script, and CSV adapters, while conflicting IDs fail with an actionable
+error.
+
+The base directory must be absolute, while `--input`, `--output`, and
+`--not-parsed` are safe relative child directories. Every `.json` file below
+the input directory is processed recursively and its relative path is mirrored
+below either the parsed output directory or the not-parsed raw-file directory.
+Existing managed parsed files and failed raw files are replaced; stale and
+unrelated output files remain. Invalid files are reported immediately and in a
+final accumulated summary after the remaining files are attempted. The command
+returns a non-zero status if any file failed.
 
 Check dependency updates and refresh the version catalog when required:
 
@@ -272,9 +370,10 @@ export FLYWAY_URL="jdbc:sqlite:/path/to/cricsheet.db"
 For a new MySQL or PostgreSQL database, ensure the `cricsheet` database exists
 before running the migration. Each dialect directory contains one
 `1__initial_tables.sql` migration with the complete normalized relational
-schema. It creates `matches.id` as the internal generated key while keeping
-`canonical_match_id` and the nullable unique `public_match_id` separate.
-`match_source_reference` retains provider keys, source IDs, and raw digests.
+schema, including team aliases and the nullable unique `source_ca_id`. It creates
+`matches.id` as the internal generated key while keeping `canonical_match_id`
+and the nullable unique `public_match_id` separate. `match_source_reference`
+retains provider keys, source IDs, and raw digests.
 Existing databases are rebuild targets: back up the old schema, apply the
 single migration, and replay canonical envelopes rather than copying old
 surrogate keys.
@@ -314,6 +413,13 @@ All parser runs use the Gradle application task:
 | `-o`, `--outputFile`       | For SQL files       | SQL script path relative to `baseDirectory`; with `SQL`, selects file output.                                |
 | `-sf`, `--sqlFile`         | For SQL files       | Alias for `--outputFile`; the path is relative to `baseDirectory`.                                           |
 | `-cd`, `--csvDir`          | For CSV output      | CSV directory relative to `baseDirectory`.                                                                   |
+| `-f`, `--force`            | For CSV output      | Replace existing contents in the CSV output directory; without it, non-empty directories are refused.       |
+
+The `--database` option applies only to generated SQL files. `mysql` is
+deliberately rejected because the MariaDB script dialect may emit DDL that
+MySQL 8 does not support. This is separate from Flyway migrations under
+`bbb-update-database/migrations/mysql/` and direct JDBC output, where
+`jdbc:mysql:` remains recognized.
 
 The updater consumes only normalized `CanonicalMatchEnvelope` JSON from
 `bbb-parse-cricsheet`; it does not decode raw Cricsheet snake-case fields.
@@ -332,6 +438,12 @@ are rejected.
 CSV output directories supplied with `-cd`/`--csvDir` follow the same rule; for
 example, `csv/warehouse` is written to `[base]/csv/warehouse`. Absolute paths
 and paths that escape `baseDirectory` are rejected.
+
+CSV transactions are coordinated by `CsvOutputAdapter` and published by its
+`CsvBundlePublisher`. The publisher serializes changed tables into a complete
+staged directory, swaps that directory into place with a durable journal, and
+recovers interrupted swaps when the output is opened again. This keeps all CSV
+tables on the same generation after a failed match write or process restart.
 
 Direct `DATABASE`/`SQL` output is idempotent for matches: it checks the
 canonical UUID against `matches.canonical_match_id` before inserting a match.

@@ -18,6 +18,9 @@ sealed class IdentityError(val message: String) {
     class InvalidUuid(value: String) : IdentityError("Value must be a valid UUID: '$value'")
 
     class InvalidSha256(value: String) : IdentityError("Value must be a lowercase SHA-256 digest: '$value'")
+
+    class InvalidSourceCaId(value: String?) :
+        IdentityError("Source CA ID must contain 1 to 10 non-whitespace characters: '$value'")
 }
 
 @Serializable
@@ -36,6 +39,14 @@ value class ProviderId private constructor(val value: String) {
         fun from(value: String): ProviderId = requireNotNull(of(value).getOrNull()) {
             "Provider ID must not be blank"
         }
+    }
+}
+
+@JvmInline
+value class AliasSourceSystem private constructor(val value: String) {
+    companion object {
+        val CRICSHEET: AliasSourceSystem =
+            AliasSourceSystem(ProviderNamespaces.CRICSHEET.toString())
     }
 }
 
@@ -76,6 +87,28 @@ value class Sha256Digest private constructor(val value: String) {
         fun from(value: String): Sha256Digest = requireNotNull(of(value).getOrNull()) {
             "Value must be a lowercase SHA-256 digest"
         }
+    }
+}
+
+@Serializable
+@JvmInline
+value class SourceCaId private constructor(val value: String) {
+    companion object {
+        context(raise: Raise<IdentityError.InvalidSourceCaId>)
+        operator fun invoke(value: String?): SourceCaId {
+            if (value.isNullOrEmpty() || value.length > MAX_LENGTH || value.any(Char::isWhitespace)) {
+                raise.raise(IdentityError.InvalidSourceCaId(value))
+            }
+            return SourceCaId(value)
+        }
+
+        fun of(value: String?): Either<IdentityError.InvalidSourceCaId, SourceCaId> = either { invoke(value) }
+
+        fun from(value: String): SourceCaId = requireNotNull(of(value).getOrNull()) {
+            "Source CA ID must contain 1 to 10 non-whitespace characters"
+        }
+
+        const val MAX_LENGTH = 20
     }
 }
 

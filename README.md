@@ -38,7 +38,7 @@ match search and scoresheet APIs through a Ktor backend and Angular web UI.
 - Command-line tools to download Cricsheet archives and player registers
 - A Cricsheet adapter that emits source and canonical match envelopes
 - A relational loader that writes SQL scripts, CSV files, or JDBC inserts, with
-  transactional JDBC match writes
+  transactional match writes across all output adapters
 - A read-only Ktor REST API over normalized match data
 - A Ktor-hosted, feature-sliced Angular SPA with OIDC BFF login and API proxying
 - Shared contracts, tiny types, Flyway migrations, and architecture docs
@@ -55,7 +55,7 @@ bbb-get-cricsheet-data
 bbb-parse-cricsheet
         │
         ▼
-  SourceMatchEnvelope
+  parsed/ and not-parsed/ outputs
         │
         ├─ current: single-source canonicalizer
         └─ future: multi-provider reconciliation app
@@ -75,6 +75,32 @@ bbb-api  ──proxied by──▶  bbb-web (Angular)
 
 Relational loading accepts **canonical envelopes only**. Cross-provider
 reconciliation is intentionally a separate future application.
+
+`bbb-parse-cricsheet` writes successful normalized envelopes below its parsed
+output directory. Per-file conversion, linking, and output errors are logged
+immediately while processing continues; the original failed raw JSON is copied
+to the matching path below the configured not-parsed directory, followed by an
+accumulated error summary and a non-zero result. Expected stats-link outcomes
+are represented as sealed values and mapped at the per-file boundary. Female
+aliases use raw Cricsheet team names; stats-name suffixes and link exclusions
+are owned by their policy resources, linked below.
+Match-link failures show the source alias key and include the stats team name
+when policy changes it. Cricsheet input is decoded once into typed source DTOs
+and explicitly mapped into the shared match contract. A durable-commit failure
+rolls match participants back before the failure is propagated.
+
+JDBC and CSV match writes share a strict `beginMatch` → prepare → durable commit
+→ identity finalization protocol. SQL scripts use the same transaction machinery
+for staging and are journal-published only after a successful import; closing an
+incomplete script abandons its staged output. Generated SQLite scripts are
+applied and read back in the adapter parity tests; generated MariaDB and
+PostgreSQL schemas are applied in Testcontainers to verify their tables, indexes,
+alias uniqueness, and preservation of operator aliases on reapplication.
+
+The authoritative stats-link exclusion data is versioned in
+[`bbb-parse-cricsheet/src/main/resources/policies/`](bbb-parse-cricsheet/src/main/resources/policies/).
+Women's competition and team-name naming exceptions are maintained in
+[`bbb-cli-shared/src/main/resources/policies/`](bbb-cli-shared/src/main/resources/policies/).
 
 ## Modules
 
@@ -106,6 +132,15 @@ Module registration lives in `settings.gradle.kts`. Dependency versions live in
 | Auth | JWT on the API; OIDC BFF sessions on the web app |
 | Local runtime | Docker Compose (`compose.yaml`) |
 | CI | GitHub Actions (`.github/workflows`) |
+
+Generated SQL scripts accept `--database mariadb`, `postgres`, or `sqlite`;
+`--database mysql` is rejected because the generated MariaDB dialect is not
+MySQL-8-safe. This does not restrict Flyway migrations under
+`bbb-update-database/migrations/mysql/` or direct `jdbc:mysql:` output. CSV
+output refuses non-empty target directories unless `--force` is supplied.
+The MySQL, PostgreSQL, and SQLite migration directories each contain a single
+complete `1__initial_tables.sql`, including the unique team-alias triple key;
+see [database architecture](docs/architecture/database.md) for cutover details.
 
 ## Match identity and public URLs
 
@@ -232,6 +267,15 @@ Compose; fill them in locally or through a secret manager before starting it.
 Do not commit real secrets. Prefer environment variables over hard-coded
 credentials in source files.
 
+For local `bbb-parse-cricsheet` runs, copy
+`bbb-parse-cricsheet/.env.example` to `bbb-parse-cricsheet/.env` and set the
+stats and ball-by-ball database passwords. The CLI loads that file when started
+from the repository root (or `.env` from the current directory otherwise).
+Reference the keys by name with `--stats-password-environment-variable
+STATS_DB_PASSWORD` and `--bbb-password-environment-variable BBB_DB_PASSWORD`;
+OS environment values take precedence over `.env` values. The local `.env` is
+ignored by Git.
+
 ## Docker Compose
 
 `compose.yaml` starts:
@@ -303,6 +347,10 @@ execution, and Docker push steps.
 | [0002](docs/adr/0002-cricsheet-data-cli.md) | Cricsheet data CLI |
 | [0003](docs/adr/0003-deterministic-match-identity.md) | Deterministic source and canonical identity |
 | [0004](docs/adr/0004-deterministic-public-match-identifiers.md) | Deterministic public match identifiers |
+| [0005](docs/adr/0005-relational-database-schema.md) | Normalized relational database schema |
+| [0006](docs/adr/0006-persistent-team-name-aliases.md) | Persistent operator-owned team aliases |
+| [0042](docs/adr/0042-relational-match-session-and-sinks.md) | Relational match session and output sinks |
+| [0043](docs/adr/0043-relational-session-jdbc-identity-store.md) | Single write pipeline with JDBC identity store |
 
 ## Design notes
 
@@ -310,6 +358,8 @@ execution, and Docker push steps.
 - `bbb-parse-cricsheet` derives Cricsheet identity from the safe basename stem,
   not the full path.
 - Relational loading accepts **canonical envelopes only**.
+- JDBC, SQL-script, and CSV writes share `RelationalMatchSession`; adapter-specific
+  identity stores and sinks handle live database keys or output serialization.
 - Cross-provider reconciliation is intentionally a separate future application.
 - `publicMatchId` is deterministic and unique-constrained; collisions fail
   loudly rather than probing another value.

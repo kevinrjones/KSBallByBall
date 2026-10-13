@@ -1,6 +1,7 @@
 package com.knowledgespike.ballbyball.parse.database
 
 import com.knowledgespike.ballbyball.identity.CanonicalMatchId
+import com.knowledgespike.ballbyball.identity.SourceCaId
 import com.knowledgespike.ballbyball.clishared.schema.Delivery
 import com.knowledgespike.ballbyball.clishared.schema.Extras
 import com.knowledgespike.ballbyball.clishared.schema.Runs
@@ -60,7 +61,7 @@ class RelationalWriteSupportTest {
                 17L,
                 "1890a7a8-f76d-5f36-89f7-39b0319044b0",
                 1_234_567_890L,
-                null,
+                "ca-12345",
                 "match.json",
                 2,
                 "odi",
@@ -146,6 +147,7 @@ class RelationalWriteSupportTest {
     private fun matchRecord() = MatchRecord(
         canonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b0")),
         publicMatchId = PublicMatchId.from(1_234_567_890L),
+        sourceCaId = SourceCaId.from("ca-12345"),
         fileName = "match.json",
         matchInSeries = 2,
         matchType = "odi",

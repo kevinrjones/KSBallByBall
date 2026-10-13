@@ -10,9 +10,4 @@ class SqlOutputAdapter(connection: Connection) : JdbcOutputAdapter(connection) {
         }
     }
 
-    override fun duplicateMatchPersonClause(): String =
-        "on conflict (match_id, person_id, role_code) do nothing"
-
-    override fun duplicateDeliveryFielderClause(): String =
-        "on conflict (delivery_id, wicket_id, person_id) do nothing"
 }

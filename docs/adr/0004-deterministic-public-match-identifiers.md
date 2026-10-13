@@ -22,8 +22,17 @@ string as the name. The first eight UUID bytes are interpreted as an unsigned
 
 The namespace, byte extraction, UTF-8 encoding, bounds, and mapping are a
 persisted contract. The public UUIDv5 intermediate is never serialized in API
-responses or URLs. `public_match_id` is stored on `dim_match` with a unique
+responses or URLs. `public_match_id` is stored on `matches` with a unique
 constraint; a collision fails loudly instead of probing for another number.
+
+## Schema note
+
+ADR 0005 supersedes this ADR's earlier dimensional-schema storage details.
+`public_match_id` now lives on normalized `matches`, not `dim_match`; the
+derivation algorithm, namespace, and public API contract in this ADR remain
+accepted. Migration filenames `4__public_match_id.sql` and
+`5__widen_public_match_id.sql` referred to the earlier migration history and
+are not present in the current dialect migration sequence.
 
 The API route is `/api/matches/{publicMatchId}/scoresheet`. Match summaries,
 search results, and scoresheet contexts expose `publicMatchId`; repositories
@@ -36,9 +45,7 @@ resolve it to the internal `match_key` before existing fact and innings joins.
   reconciled canonical identity rather than a provider key.
 - Nine billion possible values cannot guarantee collision freedom forever;
   rejecting collisions prevents a wrong match from being served.
-- Migration `4__public_match_id.sql` adds a nullable legacy-safe column, and
-  migration `5__widen_public_match_id.sql` clears obsolete seven-digit values.
-  Rows with canonical identity are backfilled when their envelope is replayed;
+- Rows with canonical identity are backfilled when their envelope is replayed;
   rows without canonical identity remain null and are not inferred from filenames.
 - Existing numeric warehouse foreign keys and source/canonical UUID semantics
   remain unchanged.

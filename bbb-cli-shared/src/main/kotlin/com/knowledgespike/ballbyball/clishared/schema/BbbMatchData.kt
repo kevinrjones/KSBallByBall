@@ -13,6 +13,7 @@ data class BbbMatchData(
 @Serializable
 data class Info(
     val ballsPerOver: Int,
+    val sourceCaId: String? = null,
     val bowlOut: List<BowlOut>? = null,
     val city: String? = null,
     val dates: List<String>,

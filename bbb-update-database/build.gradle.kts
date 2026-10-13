@@ -30,6 +30,10 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.kluent)
     testImplementation(libs.strikt)
+    testImplementation(libs.testcontainers.mariadb)
+    testImplementation(libs.testcontainers.mysql)
+    testImplementation(libs.testcontainers.postgresql)
+    testRuntimeOnly(libs.mysql.connector)
 
     implementation(libs.commons.cli)
     implementation(libs.kotlinx.serialization)

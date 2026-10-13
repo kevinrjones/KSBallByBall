@@ -26,7 +26,7 @@ private sealed interface OutputTarget {
     ) : OutputTarget
 
     data class ScriptTarget(val databaseType: String, val output: Path) : OutputTarget
-    data class CsvTarget(val directory: Path) : OutputTarget
+    data class CsvTarget(val directory: Path, val force: Boolean) : OutputTarget
 }
 
 class Application {
@@ -64,7 +64,10 @@ class Application {
 
             when (outputTarget) {
                 is OutputTarget.ScriptTarget -> createScriptOutputAdapter(outputTarget.databaseType, outputTarget.output)
-                    .use { adapter -> runImport(adapter, input, people) }
+                    .use { adapter ->
+                        runImport(adapter, input, people)
+                        adapter.complete()
+                    }
                 is OutputTarget.DatabaseTarget -> {
                     val dbConnection = DatabaseConnection(
                         outputTarget.connectionString,
@@ -73,11 +76,17 @@ class Application {
                     )
                     dbConnection.connect.use { db ->
                         createSqlOutputAdapter(outputTarget.connectionString, db.connection)
-                            .use { adapter -> runImport(adapter, input, people) }
+                            .use { adapter ->
+                                runImport(adapter, input, people)
+                                adapter.complete()
+                            }
                     }
                 }
-                is OutputTarget.CsvTarget -> CsvOutputAdapter(outputTarget.directory)
-                    .use { adapter -> runImport(adapter, input, people) }
+                is OutputTarget.CsvTarget -> CsvOutputAdapter(outputTarget.directory, outputTarget.force)
+                    .use { adapter ->
+                        runImport(adapter, input, people)
+                        adapter.complete()
+                    }
             }
             log.info("finished")
             0
@@ -103,11 +112,11 @@ class Application {
                     require(!outputFile.isNullOrBlank()) {
                         "--outputFile is required when --outputType SQL_FILE is selected"
                     }
-                    OutputTarget.ScriptTarget(databaseType, requireNotNull(outputPath))
+                    scriptTarget(databaseType, requireNotNull(outputPath))
                 }
 
                 "SQL", "DATABASE" -> if (outputType == "SQL" && !outputFile.isNullOrBlank()) {
-                    OutputTarget.ScriptTarget(databaseType, requireNotNull(outputPath))
+                    scriptTarget(databaseType, requireNotNull(outputPath))
                 } else {
                     val connectionString = cmd.getOptionValue("c")
                         ?: throw IllegalArgumentException("--connectionString is required for DATABASE output")
@@ -118,7 +127,7 @@ class Application {
                     require(!csvDirectory.isNullOrBlank()) {
                         "--csvDir is required when --outputType CSV is selected"
                     }
-                    OutputTarget.CsvTarget(requireNotNull(csvPath))
+                    OutputTarget.CsvTarget(requireNotNull(csvPath), cmd.hasOption("force"))
                 }
 
                 else -> throw IllegalArgumentException("Unsupported output type: $outputType")
@@ -126,10 +135,20 @@ class Application {
         }
 
         private fun createScriptOutputAdapter(databaseType: String, output: Path): OutputAdapter = when (databaseType) {
-            "mariadb", "mysql" -> MariaDbSqlScriptOutputAdapter(output)
+            "mariadb" -> MariaDbSqlScriptOutputAdapter(output)
             "postgres", "postgresql" -> PostgresSqlScriptOutputAdapter(output)
             "sqlite" -> SqliteSqlScriptOutputAdapter(output)
             else -> throw IllegalArgumentException("Unsupported database type: $databaseType")
+        }
+
+        private fun scriptTarget(databaseType: String, output: Path): OutputTarget.ScriptTarget {
+            require(databaseType != "mysql") {
+                "MySQL is not supported for generated SQL scripts; use --database mariadb for MariaDB scripts"
+            }
+            require(databaseType in setOf("mariadb", "postgres", "postgresql", "sqlite")) {
+                "Unsupported database type for generated SQL script: $databaseType"
+            }
+            return OutputTarget.ScriptTarget(databaseType, output)
         }
 
         private fun createSqlOutputAdapter(connectionString: String, connection: java.sql.Connection): OutputAdapter =
@@ -167,6 +186,7 @@ class Application {
             )
             options.addOption("sf", "sqlFile", true, "alias for outputFile")
             options.addOption("cd", "csvDir", true, "CSV output directory; required for CSV output")
+            options.addOption("f", "force", false, "replace existing contents in the CSV output directory")
             UpdateDatabaseArguments.options().options.forEach(options::addOption)
             return options
         }

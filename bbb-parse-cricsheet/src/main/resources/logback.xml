@@ -17,9 +17,30 @@
             <pattern>%d{YYYY-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
+    <appender name="LOOKUP-FAILURES-STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{YYYY-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    <appender name="LOOKUP-FAILURES-FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/lookup_failures.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archived/lookup_failures.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <totalSizeCap>20GB</totalSizeCap>
+            <maxHistory>60</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{YYYY-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
     <root level="info">
         <appender-ref ref="STDOUT"/>
         <appender-ref ref="FILE-ROLLING"/>
     </root>
     <logger name="com.knowledgespike" level="debug"/>
+    <logger name="com.knowledgespike.ballbyball.parsecricsheet.lookup-failures" level="warn" additivity="false">
+        <appender-ref ref="LOOKUP-FAILURES-STDOUT"/>
+        <appender-ref ref="LOOKUP-FAILURES-FILE"/>
+    </logger>
 </configuration>

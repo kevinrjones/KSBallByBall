@@ -1,6 +1,8 @@
 package com.knowledgespike.ballbyball.parse.database
 
+import com.knowledgespike.ballbyball.identity.AliasSourceSystem
 import com.knowledgespike.ballbyball.identity.CanonicalMatchId
+import com.knowledgespike.ballbyball.identity.SourceCaId
 import com.knowledgespike.ballbyball.types.values.PublicMatchId
 
 import com.knowledgespike.cricketarchive.InvalidStateException
@@ -17,10 +19,82 @@ import strikt.assertions.isGreaterThan
 import strikt.assertions.isEqualTo
 import java.nio.file.Files
 import java.sql.DriverManager
+import java.sql.SQLException
 import java.time.LocalDate
 import java.util.UUID
 
 class SqlScriptOutputAdapterTest {
+    @Test
+    fun `given a row write outside a match transaction then it is rejected`() {
+        val output = Files.createTempFile("warehouse-write-without-transaction", ".sql")
+
+        SqlScriptOutputAdapter(output).use { adapter ->
+            val failure = assertThrows<IllegalStateException> {
+                adapter.upsertPerson("player-1", "Player One", 1)
+            }
+
+            expectThat(failure.message).isEqualTo("No match transaction is active")
+        }
+    }
+
+    @Test
+    fun `given an active match transaction when completed then script is not published`() {
+        val output = Files.createTempFile("warehouse-active-complete", ".sql")
+        Files.writeString(output, "previous script")
+
+        assertThrows<IllegalStateException> {
+            SqlScriptOutputAdapter(output).use { adapter ->
+                adapter.beginMatch()
+                adapter.complete()
+            }
+        }
+
+        expectThat(Files.readString(output)).isEqualTo("previous script")
+    }
+
+    @Test
+    fun `given import failure then previous script is preserved and staged output is removed`() {
+        val directory = Files.createTempDirectory("warehouse-failed-import")
+        val output = directory.resolve("import.sql")
+        Files.writeString(output, "previous script")
+
+        assertThrows<IllegalStateException> {
+            SqlScriptOutputAdapter(output).use { adapter ->
+                adapter.beginMatch()
+                adapter.upsertPerson("player-1", "Player One", 1)
+                adapter.commit()
+                adapter.beginMatch()
+                adapter.upsertPerson("player-2", "Player Two", 2)
+                throw IllegalStateException("import failed")
+            }
+        }
+
+        expectThat(Files.readString(output)).isEqualTo("previous script")
+        val stagedFiles = Files.list(directory).use { files ->
+            files.filter { it.fileName.toString().startsWith(".import.sql") && it.fileName.toString().endsWith(".tmp") }
+                .count()
+        }
+        expectThat(stagedFiles).isEqualTo(0L)
+    }
+
+    @Test
+    fun `given a string value containing a question mark when written then later values remain bound correctly`() {
+        val output = Files.createTempFile("warehouse-question-mark", ".sql")
+
+        SqlScriptOutputAdapter(output).use { adapter ->
+            adapter.beginMatch()
+            adapter.upsertPerson("player?source", "Why Player", 42)
+            adapter.commit()
+            adapter.complete()
+        }
+
+        val sql = Files.readString(output)
+        expectThat(sql).contains(
+            "INSERT INTO people (id, source_person_id, full_name, sort_name_part, other_name_part, ca_id) " +
+                "VALUES (1, 'player?source', 'Why Player', 'WhyPlayer', '', 42);"
+        )
+    }
+
     @Test
     fun `given a forced public ID collision then the second canonical match is rejected`() {
         val output = Files.createTempFile("warehouse-collision", ".sql")
@@ -29,15 +103,68 @@ class SqlScriptOutputAdapterTest {
 
         assertThrows<InvalidStateException> {
             SqlScriptOutputAdapter(output).use { adapter ->
+                adapter.beginMatch()
                 adapter.insertMatch(first)
                 adapter.insertMatch(second)
             }
         }
     }
+
+    @Test
+    fun `given an existing match when source ca id is discovered then update is emitted`() {
+        val output = Files.createTempFile("warehouse-source-ca", ".sql")
+        val match = testMatchRecord("1890a7a8-f76d-5f36-89f7-39b0319044b0")
+
+        SqlScriptOutputAdapter(output).use { adapter ->
+            adapter.beginMatch()
+            adapter.insertMatch(match)
+            adapter.insertMatch(match.copy(sourceCaId = SourceCaId.from("ca-12345")))
+            adapter.commit()
+            adapter.complete()
+        }
+
+        val sql = Files.readString(output)
+        expectThat(sql).contains("UPDATE matches SET source_ca_id = 'ca-12345' WHERE id = 1 AND source_ca_id IS NULL;")
+    }
+
+    @Test
+    fun `given an existing innings when declaration changes then update is emitted`() {
+        val output = Files.createTempFile("warehouse-innings-declared", ".sql")
+
+        SqlScriptOutputAdapter(output).use { adapter ->
+            adapter.beginMatch()
+            val match = adapter.insertMatch(testMatchRecord("1890a7a8-f76d-5f36-89f7-39b0319044b0"))
+            adapter.upsertInnings(match.id, 1, 2, 3, declared = false)
+            adapter.upsertInnings(match.id, 1, 2, 3, declared = true)
+            adapter.commit()
+            adapter.complete()
+        }
+
+        expectThat(Files.readString(output)).contains("UPDATE innings SET declared = 1 WHERE id = 1;")
+    }
+
+    @Test
+    fun `given a rolled back source ca reconciliation then no update is emitted`() {
+        val output = Files.createTempFile("warehouse-source-ca-rollback", ".sql")
+        val match = testMatchRecord("1890a7a8-f76d-5f36-89f7-39b0319044b0")
+
+        SqlScriptOutputAdapter(output).use { adapter ->
+            adapter.beginMatch()
+            adapter.insertMatch(match)
+            adapter.commit()
+            adapter.beginMatch()
+            adapter.insertMatch(match.copy(sourceCaId = SourceCaId.from("ca-12345")))
+            adapter.rollback()
+            adapter.complete()
+        }
+
+        expectThat(Files.readString(output)).not().contains("source_ca_id = 'ca-12345'")
+    }
     @Test
     fun `given a new script when opened then relational tables are reset before data`() {
         val output = Files.createTempFile("warehouse", ".sql")
         val adapter = SqlScriptOutputAdapter(output)
+        adapter.complete()
         adapter.close()
 
         val sql = Files.readString(output)
@@ -60,17 +187,18 @@ class SqlScriptOutputAdapterTest {
     @Test
     fun `given mariadb output when opened then every relational table uses innodb`() {
         val output = Files.createTempFile("warehouse", ".sql")
-        SqlScriptOutputAdapter(output).use { }
+        SqlScriptOutputAdapter(output).use { adapter -> adapter.complete() }
 
         val sql = Files.readString(output)
-        expectThat(Regex("CREATE TABLE ").findAll(sql).count()).isEqualTo(12)
-        expectThat(Regex("\\) ENGINE = InnoDB;").findAll(sql).count()).isEqualTo(12)
+        expectThat(Regex("CREATE TABLE ").findAll(sql).count()).isEqualTo(13)
+        expectThat(Regex("\\) ENGINE = InnoDB;").findAll(sql).count()).isEqualTo(13)
+        expectThat(Regex("CREATE INDEX [^;]*ENGINE = InnoDB").findAll(sql).count()).isEqualTo(0)
     }
 
     @Test
     fun `given mariadb output then relational foreign keys use the match key type`() {
         val output = Files.createTempFile("warehouse", ".sql")
-        SqlScriptOutputAdapter(output).use { }
+        SqlScriptOutputAdapter(output).use { adapter -> adapter.complete() }
 
         val sql = Files.readString(output)
         expectThat(sql).contains("match_id BIGINT NOT NULL")
@@ -90,8 +218,11 @@ class SqlScriptOutputAdapterTest {
         val output = Files.createTempFile("warehouse", ".sql")
         val adapter = SqlScriptOutputAdapter(output)
 
+        adapter.beginMatch()
         val firstKey = adapter.upsertPerson("person-1", "O'Brien", 7)
         val secondKey = adapter.upsertPerson("person-1", "O'Brien", 7)
+        adapter.commit()
+        adapter.complete()
         adapter.close()
 
         val sql = Files.readString(output)
@@ -104,8 +235,11 @@ class SqlScriptOutputAdapterTest {
     fun `given repeated delivery fielder when written then one bridge insert is emitted`() {
         val output = Files.createTempFile("warehouse", ".sql")
         SqlScriptOutputAdapter(output).use { adapter ->
+            adapter.beginMatch()
             adapter.insertDeliveryFielder(1, 2, 3)
             adapter.insertDeliveryFielder(1, 2, 3)
+            adapter.commit()
+            adapter.complete()
         }
 
         val sql = Files.readString(output)
@@ -117,6 +251,7 @@ class SqlScriptOutputAdapterTest {
         val output = Files.createTempFile("warehouse", ".sql")
         val sourceFile = output.parent.resolve("12345.json").toAbsolutePath().normalize()
         val adapter = SqlScriptOutputAdapter(output)
+        adapter.beginMatch()
         val team1 = adapter.upsertTeam("Home")
         val team2 = adapter.upsertTeam("Away")
         val ground = adapter.upsertGround("The Oval")
@@ -143,6 +278,8 @@ class SqlScriptOutputAdapterTest {
                 loserTeamKey = team2.id
             )
         )
+        adapter.commit()
+        adapter.complete()
         adapter.close()
 
         val sql = Files.readString(output)
@@ -159,18 +296,21 @@ class SqlScriptOutputAdapterTest {
     fun `given postgres output when opened then postgres syntax is emitted`() {
         val output = Files.createTempFile("warehouse-postgres", ".sql")
         PostgresSqlScriptOutputAdapter(output).use { adapter ->
+            adapter.beginMatch()
             adapter.insertMatchPerson(1, 1, "player")
             adapter.insertDeliveryFielder(1, 2, 3)
+            adapter.commit()
+            adapter.complete()
         }
 
         val sql = Files.readString(output)
         expectThat(sql).contains("CREATE SCHEMA IF NOT EXISTS acs_ball_by_ball;")
         expectThat(sql).contains("BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY")
-        expectThat(sql).contains("ON CONFLICT (match_id, person_id, role_code) DO NOTHING")
+        expectThat(sql).contains("INSERT INTO match_people (id, match_id, person_id, role_code) VALUES (1, 1, 1, 'player');")
         expectThat(sql).contains(
-            "INSERT INTO delivery_fielders (delivery_id, wicket_id, person_id) VALUES (1, 2, 3) " +
-                    "ON CONFLICT (delivery_id, wicket_id, person_id) DO NOTHING;"
+            "INSERT INTO delivery_fielders (delivery_id, wicket_id, person_id) VALUES (1, 2, 3);"
         )
+        expectThat(sql.contains("ON CONFLICT")).isEqualTo(false)
         expectThat(sql).contains("START TRANSACTION;")
     }
 
@@ -178,20 +318,37 @@ class SqlScriptOutputAdapterTest {
     fun `given sqlite output when opened then sqlite syntax is emitted`() {
         val output = Files.createTempFile("warehouse-sqlite", ".sql")
         SqliteSqlScriptOutputAdapter(output).use { adapter ->
+            adapter.beginMatch()
             adapter.insertMatchPerson(1, 1, "player")
+            adapter.commit()
+            adapter.complete()
         }
 
         val sql = Files.readString(output)
         expectThat(sql).contains("PRAGMA foreign_keys = ON;")
+        expectThat(sql.contains("ENGINE = InnoDB")).isEqualTo(false)
         expectThat(sql).contains("INTEGER PRIMARY KEY AUTOINCREMENT")
-        expectThat(sql).contains("ON CONFLICT (match_id, person_id, role_code) DO NOTHING")
+        expectThat(sql).contains("INSERT INTO match_people (id, match_id, person_id, role_code) VALUES (1, 1, 1, 'player');")
+        expectThat(sql.contains("ON CONFLICT")).isEqualTo(false)
         expectThat(sql).contains("BEGIN TRANSACTION;")
+    }
+
+    @Test
+    fun `given an active match transaction when closed then its rows are rolled back from the script`() {
+        val output = Files.createTempFile("warehouse-sqlite-close-active", ".sql")
+        val adapter = SqliteSqlScriptOutputAdapter(output)
+
+        adapter.beginMatch()
+        adapter.upsertTeam("Uncommitted team")
+        adapter.close()
+
+        expectThat(Files.readString(output).contains("INSERT INTO teams")).isEqualTo(false)
     }
 
     @Test
     fun `given sqlite output when executed then relational schema is created`() {
         val output = Files.createTempFile("warehouse-sqlite", ".sql")
-        SqliteSqlScriptOutputAdapter(output).use { }
+        SqliteSqlScriptOutputAdapter(output).use { adapter -> adapter.complete() }
         val statements = Files.readString(output)
             .split(';')
             .map { statement ->
@@ -206,7 +363,7 @@ class SqlScriptOutputAdapterTest {
                     "select count(*) from sqlite_master where type = 'table' and name not like 'sqlite_%'"
                 ).use { result ->
                     result.next()
-                    expectThat(result.getInt(1)).isEqualTo(12)
+                    expectThat(result.getInt(1)).isEqualTo(13)
                 }
                 statement.executeQuery(
                     "select count(*) from sqlite_master where type = 'index' and name = 'idx_deliveries_match_order'"
@@ -215,6 +372,7 @@ class SqlScriptOutputAdapterTest {
                     expectThat(result.getInt(1)).isEqualTo(1)
                 }
                 listOf(
+                    "idx_team_name_aliases_stats_team_id",
                     "idx_deliveries_match_sequence",
                     "idx_matches_file_name",
                     "idx_matches_type_year",
@@ -229,6 +387,21 @@ class SqlScriptOutputAdapterTest {
                         result.next()
                         expectThat(result.getInt(1)).isEqualTo(1)
                     }
+                }
+                statement.execute(
+                    "INSERT INTO team_name_aliases (source_system, source_team_name, stats_team_id) " +
+                        "VALUES ('${AliasSourceSystem.CRICSHEET.value}', 'Comilla Warriors', 42)"
+                )
+                statement.execute(
+                    "INSERT INTO team_name_aliases (source_system, source_team_name, stats_team_id) " +
+                        "VALUES ('${AliasSourceSystem.CRICSHEET.value}', 'Comilla Warriors', 43)"
+                )
+                statement.executeQuery(
+                    "select count(*) from pragma_table_info('team_name_aliases') " +
+                        "where name in ('source_system', 'source_team_name', 'stats_team_id')"
+                ).use { result ->
+                    result.next()
+                    expectThat(result.getInt(1)).isEqualTo(3)
                 }
                 statement.executeQuery(
                     "select count(*) from pragma_table_info('matches') where name = 'duration_days'"

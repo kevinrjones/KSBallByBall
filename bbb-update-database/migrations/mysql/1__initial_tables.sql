@@ -1,38 +1,5 @@
 USE acs_ball_by_ball;
 
--- Rebuild cutover: preserve the old database operationally through backup and
--- canonical-envelope replay rather than copying warehouse surrogate keys.
-DROP TABLE IF EXISTS bridge_delivery_fielder;
-DROP TABLE IF EXISTS bridge_delivery_wicket;
-DROP TABLE IF EXISTS bridge_match_person;
-DROP TABLE IF EXISTS fact_delivery;
-DROP TABLE IF EXISTS fact_match;
-DROP TABLE IF EXISTS dim_wicket;
-DROP TABLE IF EXISTS dim_innings;
-DROP TABLE IF EXISTS match_source_reference;
-DROP TABLE IF EXISTS dim_match;
-DROP TABLE IF EXISTS dim_ground;
-DROP TABLE IF EXISTS dim_person;
-DROP TABLE IF EXISTS dim_team;
-DROP TABLE IF EXISTS dim_date;
-DROP TABLE IF EXISTS BallsWickets;
-DROP TABLE IF EXISTS Wickets;
-DROP TABLE IF EXISTS BallByBall;
-DROP TABLE IF EXISTS ReserveUmpiresMatches;
-DROP TABLE IF EXISTS MatchRefereesMatches;
-DROP TABLE IF EXISTS TvUmpiresMatches;
-DROP TABLE IF EXISTS UmpiresMatches;
-DROP TABLE IF EXISTS PlayersMatches;
-DROP TABLE IF EXISTS Matches;
-DROP TABLE IF EXISTS MatchReferees;
-DROP TABLE IF EXISTS TvUmpires;
-DROP TABLE IF EXISTS ReserveUmpires;
-DROP TABLE IF EXISTS Umpires;
-DROP TABLE IF EXISTS Players;
-DROP TABLE IF EXISTS PersonRegistry;
-DROP TABLE IF EXISTS Grounds;
-DROP TABLE IF EXISTS Teams;
-
 CREATE TABLE dates
 (
     date_id          INT        NOT NULL PRIMARY KEY,
@@ -89,7 +56,7 @@ CREATE TABLE matches
     id                 BIGINT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
     canonical_match_id CHAR(36)        NULL,
     public_match_id    BIGINT          NULL,
-    source_ca_id       VARCHAR(10)     NULL,
+    source_ca_id       VARCHAR(20)     NULL,
     file_name          VARCHAR(120)    NOT NULL,
     match_in_series    INT             NOT NULL,
     match_type         VARCHAR(15)     NOT NULL,
@@ -113,6 +80,7 @@ CREATE TABLE matches
     match_count        TINYINT UNSIGNED NOT NULL DEFAULT 1,
     UNIQUE KEY uq_matches_canonical_id (canonical_match_id),
     UNIQUE KEY uq_matches_public_id (public_match_id),
+    UNIQUE KEY uq_matches_source_ca_id (source_ca_id),
     KEY idx_matches_type (match_type),
     KEY idx_matches_file_name (file_name),
     KEY idx_matches_type_year (match_type, match_start_year),
@@ -130,6 +98,45 @@ CREATE TABLE matches
     CONSTRAINT fk_matches_winner_team FOREIGN KEY (winner_team_id) REFERENCES teams (id),
     CONSTRAINT fk_matches_loser_team FOREIGN KEY (loser_team_id) REFERENCES teams (id)
 ) ENGINE = InnoDB;
+
+CREATE TABLE IF NOT EXISTS team_name_aliases
+(
+    source_system    VARCHAR(50)  NOT NULL,
+    source_team_name VARCHAR(100) NOT NULL,
+    stats_team_id    INT          NOT NULL
+) ENGINE = InnoDB;
+
+SET @team_name_aliases_index_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'team_name_aliases'
+      AND index_name = 'idx_team_name_aliases_stats_team_id'
+);
+SET @team_name_aliases_index_ddl = IF(
+    @team_name_aliases_index_exists = 0,
+    'CREATE INDEX idx_team_name_aliases_stats_team_id ON team_name_aliases (stats_team_id)',
+    'SELECT 1'
+);
+PREPARE team_name_aliases_index_statement FROM @team_name_aliases_index_ddl;
+EXECUTE team_name_aliases_index_statement;
+DEALLOCATE PREPARE team_name_aliases_index_statement;
+
+SET @team_name_aliases_unique_index_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'team_name_aliases'
+      AND index_name = 'uq_team_name_aliases_source_name_team'
+);
+SET @team_name_aliases_unique_index_ddl = IF(
+    @team_name_aliases_unique_index_exists = 0,
+    'CREATE UNIQUE INDEX uq_team_name_aliases_source_name_team ON team_name_aliases (source_system, source_team_name, stats_team_id)',
+    'SELECT 1'
+);
+PREPARE team_name_aliases_unique_index_statement FROM @team_name_aliases_unique_index_ddl;
+EXECUTE team_name_aliases_unique_index_statement;
+DEALLOCATE PREPARE team_name_aliases_unique_index_statement;
 
 CREATE TABLE match_source_reference
 (

@@ -4,6 +4,7 @@ import com.knowledgespike.ballbyball.clishared.identity.SourceReference
 import com.knowledgespike.ballbyball.clishared.schema.Delivery
 import com.knowledgespike.ballbyball.identity.CanonicalMatchId
 import com.knowledgespike.ballbyball.identity.DeterministicIdentity
+import com.knowledgespike.ballbyball.identity.SourceCaId
 import com.knowledgespike.ballbyball.parse.database.Ground
 import com.knowledgespike.ballbyball.parse.database.InningsEntity
 import com.knowledgespike.ballbyball.parse.database.MatchEntity
@@ -12,9 +13,13 @@ import com.knowledgespike.ballbyball.parse.database.Team
 import com.knowledgespike.ballbyball.types.values.PublicMatchId
 
 interface OutputAdapter : AutoCloseable {
+    fun complete() {}
+
     fun findMatchKey(canonicalMatchId: CanonicalMatchId): Long?
 
     fun ensurePublicMatchId(canonicalMatchId: CanonicalMatchId, publicMatchId: PublicMatchId)
+
+    fun reconcileSourceCaId(canonicalMatchId: CanonicalMatchId, sourceCaId: SourceCaId?)
 
     fun sourceReferencesChanged(
         canonicalMatchId: CanonicalMatchId,
@@ -55,11 +60,14 @@ interface OutputAdapter : AutoCloseable {
 
     fun writeAllPeople(people: Sequence<PersonEntity>)
 
-    fun beginMatch() = Unit
+    /** Starts a non-reentrant match transaction; nested calls are rejected. */
+    fun beginMatch()
 
+    /** Commits the active match transaction; throws when no match transaction is active. */
     fun commit()
 
-    fun rollback() = Unit
+    /** Rolls back the active match transaction; inactive rollback is a no-op. */
+    fun rollback()
 
     override fun close()
 }
@@ -67,6 +75,7 @@ interface OutputAdapter : AutoCloseable {
 data class MatchRecord(
     val canonicalMatchId: CanonicalMatchId,
     val publicMatchId: PublicMatchId = DeterministicIdentity.publicMatchId(canonicalMatchId),
+    val sourceCaId: SourceCaId? = null,
     val fileName: String,
     val matchInSeries: Int,
     val matchType: String,

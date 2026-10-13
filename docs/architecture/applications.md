@@ -29,6 +29,8 @@ flowchart LR
     RETRIEVE[bbb-get-cricsheet-data] --> RAW[Raw Cricsheet JSON]
     RAW --> PARSE[bbb-parse-cricsheet]
     PARSE --> SOURCE[SourceMatchEnvelope]
+    STATS[CricketArchive stats database] --> PARSE
+    ALIASES[BBB alias database] --> PARSE
     SOURCE --> SINGLE[Single-source canonicalizer]
     SOURCE -. future .-> RECONCILE[Reconciliation application]
     RECONCILE -.-> CANONICAL[CanonicalMatchEnvelope]
@@ -38,7 +40,34 @@ flowchart LR
 ```
 
 `bbb-parse-cricsheet` owns the annotated Cricsheet input model and maps source
-format/gender values to relational match types. `bbb-cli-shared` contains the
+format/gender values to relational match types. `ParseCricsheetInput` carries a
+single validated `ParseDirectoryLayout`, which `CricSheetParser` consumes. The
+parser reads the CricketArchive stats database and ball-by-ball alias database
+through separate JDBC connections created by `StatsMatchLinker.fromConnections`.
+The linker returns sealed `StatsLinkResult` values: `Linked`, `NotFound`,
+`Ambiguous`, `InvalidAlias`, or `Skipped`. The parser maps expected outcomes at
+the per-file boundary; infrastructure failures remain exceptions.
+
+Match linking first queries policy-adjusted stats names and date. On an exact
+miss, aliases are resolved using raw Cricsheet source names and the
+provider-namespace UUID `f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b` as
+`team_name_aliases.source_system`. This alias key is distinct from
+`ProviderId` `"cricsheet"`, which identifies the provider in
+`match_source_reference`. Validated target IDs are combined with the
+stats-facing names into one set-based alias query, preserving home/away
+interchangeability. A margin-constrained `NotFound` is retried as a plain second
+attempt without `Matches.HowMuch`. `sourceCaId` is optional CricketArchive
+enrichment in the otherwise source-neutral payload and remains null for skipped
+or unlinked matches. Final expected link failures fail that file and preserve
+the raw file below the not-parsed output directory.
+
+`TeamNamePolicy` owns female stats-name shaping and reads
+`policies/female-competition-exceptions.txt` and
+`policies/female-team-exceptions.txt`. Link exclusions are owned by
+`StatsMatchLinkPolicy`; `policies/stats-all-season-exclusions.txt` and
+`policies/stats-season-exclusions.txt` are the authoritative sources. Keep
+exclusion values in those resources rather than duplicating them in this guide.
+`bbb-cli-shared` contains the
 normalized payload with Kotlin-compatible camelCase property names and the
 versioned source/canonical envelopes. The adapter hashes exact raw bytes,
 derives a provider-scoped UUIDv5 from the safe basename stem (including keys
@@ -49,9 +78,24 @@ multiple providers are available. The updater consumes canonical envelopes
 only.
 
 The parser requires an absolute `--base-directory` plus safe relative
-`--input` and `--output` directories. It recursively mirrors JSON files,
-atomically replaces managed outputs, preserves unrelated files, and continues
-after individual failures before returning a non-zero result.
+`--input`, `--output`, and `--not-parsed` directories, a stats JDBC URL, and a
+ball-by-ball JDBC URL. It recursively mirrors JSON files, atomically replaces
+managed parsed outputs, copies failed raw files to the matching `--not-parsed`
+path, preserves unrelated files, and continues after per-file conversion,
+linking, or output errors. It logs failures immediately and again as an
+accumulated summary, then returns non-zero when any file failed. Operators add
+aliases manually to `team_name_aliases(source_system, source_team_name,
+stats_team_id)` and rerun the parser after a logged failure; parsing never
+creates aliases.
+
+Each dialect's `1__initial_tables.sql` migration creates the alias table with
+`IF NOT EXISTS` (without dropping it), its lookup index, the source-match
+uniqueness constraint, and the unique alias triple index. Operator-owned alias
+data is not seeded into versioned schema files. The updater reconciles a newly
+available `sourceCaId` during idempotent re-imports through JDBC, SQL-script,
+and CSV adapters and rejects conflicting assignments. The shared
+`TeamNamePolicy` is used by parser linking and warehouse normalization so female
+competition and team exceptions cannot drift between stages.
 
 `bbb-get-cricsheet-data` is intentionally a standalone command-line application.
 It supports a full retrieval mode that discovers JSON archive links from the
@@ -128,8 +172,30 @@ SQL script output selected with `-o`/`--outputFile` or `-sf`/`--sqlFile` is
 resolved relative to the configured base directory. Nested paths are allowed,
 while absolute paths and paths that escape the base directory are rejected.
 CSV output selected with `-cd`/`--csvDir` follows the same base-directory
-relative path contract; the resolved directory is cleared and populated by the
-CSV adapter.
+relative path contract. A non-empty output directory is refused unless the
+operator supplies `--force`; explicit force replaces existing contents.
+`CsvOutputAdapter` coordinates relational state and transaction snapshots,
+while `CsvBundlePublisher` owns CSV serialization, complete-bundle staging,
+durable publication journaling, and restart recovery. Each committed match is
+staged as a complete directory bundle and published with one directory swap, so
+a failed publication leaves the previous set of relational CSV files intact
+rather than mixing table generations.
+
+`Database` retains the `OutputAdapter` port. JDBC, SQL-script, and CSV adapters
+inherit common domain forwarding from `SessionBackedOutputAdapter` and compose
+one `MatchTransaction` from relational identity and sink snapshot hooks.
+`JdbcOutputAdapter` supplies a live `JdbcIdentityStore` and `JdbcRowSink`; JDBC
+owns `Connection.commit()` at the adapter boundary. Closing an active match
+transaction rolls it back; CSV only publishes pending output on explicit commit.
+After a successful SQL-script import, the application calls `complete()`,
+which appends `COMMIT;` and publishes the completed script. SQL-script `close()`
+does not publish: it rolls back an active match if needed and abandons staged
+output, deleting the staged file when no publication journal is pending.
+
+Generated SQL scripts support `mariadb`, `postgres`, and `sqlite`. The CLI
+rejects `mysql` for generated scripts because MariaDB DDL is not guaranteed to
+work on MySQL 8. This is separate from the Flyway files under
+`bbb-update-database/migrations/mysql/` and direct `jdbc:mysql:` connections.
 
 ## Runtime flow & Authentication Architecture
 

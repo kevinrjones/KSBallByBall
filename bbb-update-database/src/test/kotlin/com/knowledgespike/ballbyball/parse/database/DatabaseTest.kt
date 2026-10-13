@@ -6,10 +6,13 @@ import com.knowledgespike.ballbyball.clishared.identity.MergeEvidence
 import com.knowledgespike.ballbyball.identity.ProviderId
 import com.knowledgespike.ballbyball.identity.Sha256Digest
 import com.knowledgespike.ballbyball.identity.SourceRecordId
+import com.knowledgespike.ballbyball.identity.SourceCaId
 import com.knowledgespike.ballbyball.clishared.identity.SourceReference
 
 import com.knowledgespike.ballbyball.parse.database.adapter.sqlite.SqlScriptOutputAdapter
 import com.knowledgespike.ballbyball.parse.database.adapter.sqlite.SqlOutputAdapter
+import com.knowledgespike.ballbyball.parse.database.adapter.csv.CsvOutputAdapter
+import com.knowledgespike.ballbyball.parse.database.adapter.getNameParts
 import com.knowledgespike.ballbyball.parse.database.adapter.DeliveryRecord
 import com.knowledgespike.ballbyball.parse.database.adapter.MatchRecord
 import com.knowledgespike.ballbyball.parse.database.adapter.OutputAdapter
@@ -39,7 +42,9 @@ import strikt.assertions.contains
 import strikt.assertions.isEqualTo
 import java.nio.file.Files
 import java.sql.DriverManager
+import java.util.Locale
 import java.util.UUID
+import java.util.stream.Stream
 
 class DatabaseTest {
     @Test
@@ -67,6 +72,68 @@ class DatabaseTest {
         expectThat(adapter.matchStarted).isEqualTo(true)
         expectThat(adapter.rollbackRequested).isEqualTo(true)
         expectThat(adapter.commitRequested).isEqualTo(false)
+    }
+
+    @Test
+    fun `given an invalid wire source ca id when writing then tiny type rejects it at the boundary`() {
+        val adapter = FailingMatchOutputAdapter()
+        val sourceMatch = cricSheetWithFielder().let { match ->
+            match.copy(match = match.match.copy(sourceCaId = "ca invalid"))
+        }
+
+        assertThrows<IllegalArgumentException> {
+            Database(adapter).writeMatch("/new/root/12345.json", sourceMatch)
+        }
+
+        expectThat(adapter.matchStarted).isEqualTo(true)
+        expectThat(adapter.rollbackRequested).isEqualTo(true)
+        expectThat(adapter.commitRequested).isEqualTo(false)
+    }
+
+    @Test
+    fun `given a failed people bootstrap when writing then the adapter rolls back`() {
+        val adapter = FailingMatchOutputAdapter(failPeopleWrites = true)
+
+        assertThrows<IllegalStateException> {
+            Database(adapter).writeAllPeople(Stream.of(PersonEntity("person-1", "Player", 12)))
+        }
+
+        expectThat(adapter.matchStarted).isEqualTo(true)
+        expectThat(adapter.rollbackRequested).isEqualTo(true)
+        expectThat(adapter.commitRequested).isEqualTo(false)
+    }
+
+    @Test
+    fun `given a csv match write that fails after staging rows then no failed rows are published`() {
+        val output = Files.createTempDirectory("warehouse-csv-transaction")
+        val failedMatch = cricSheetWithFielder().copy(
+            innings = cricSheetWithFielder().innings.map { it.copy(team = "Unknown") }
+        )
+
+        assertThrows<InvalidStateException> {
+            CsvOutputAdapter(output).use { adapter ->
+                Database(adapter).writeMatch("/new/root/12345.json", failedMatch)
+            }
+        }
+
+        expectThat(Files.exists(output.resolve("matches.csv"))).isEqualTo(false)
+        expectThat(Files.exists(output.resolve("teams.csv"))).isEqualTo(false)
+    }
+
+    @Test
+    fun `given a sql script match write that fails after staging rows then no failed rows are published`() {
+        val output = Files.createTempFile("warehouse-sql-transaction", ".sql")
+        val failedMatch = cricSheetWithFielder().copy(
+            innings = cricSheetWithFielder().innings.map { it.copy(team = "Unknown") }
+        )
+
+        assertThrows<InvalidStateException> {
+            SqlScriptOutputAdapter(output).use { adapter ->
+                Database(adapter).writeMatch("/new/root/12345.json", failedMatch)
+            }
+        }
+
+        expectThat(Files.readString(output)).not().contains("INSERT INTO matches")
     }
 
     private fun Database.writeMatch(fileName: String, cricSheet: BbbMatchData) {
@@ -101,9 +168,25 @@ class DatabaseTest {
                     )
                     """.trimIndent()
                 )
+                statement.execute(
+                    """
+                    create table match_source_reference (
+                        match_id integer not null,
+                        provider varchar(100) not null,
+                        provider_record_key varchar(255) not null,
+                        source_record_id char(36) not null,
+                        raw_content_digest char(64) not null
+                    )
+                    """.trimIndent()
+                )
                 statement.executeUpdate(
                     "insert into matches (id, canonical_match_id) " +
                         "values (7, '1890a7a8-f76d-5f36-89f7-39b0319044b0')"
+                )
+                statement.executeUpdate(
+                    "insert into match_source_reference " +
+                        "(match_id, provider, provider_record_key, source_record_id, raw_content_digest) " +
+                        "values (7, 'cricsheet', '12345', 'c61f62bd-7b02-5c3f-ae44-572d533b5877', '${"0".repeat(64)}')"
                 )
             }
 
@@ -141,6 +224,7 @@ class DatabaseTest {
                 fileName = "12345.json",
                 cricSheet = cricSheet
             )
+            adapter.complete()
         }
 
         expectThat(Files.readString(output)).contains("'wtt'")
@@ -193,12 +277,12 @@ class DatabaseTest {
                 fileName = "12345.json",
                 cricSheet = cricSheetWithFielder(Player(name = "Fielder"))
             )
+            adapter.complete()
         }
 
         val sql = Files.readString(output)
         expectThat(sql).contains(
-            "INSERT INTO delivery_fielders (delivery_id, wicket_id, person_id) VALUES (1, 1, 4) " +
-                    "ON CONFLICT (delivery_id, wicket_id, person_id) DO NOTHING;"
+            "INSERT INTO delivery_fielders (delivery_id, wicket_id, person_id) VALUES (1, 1, 4);"
         )
     }
 
@@ -211,6 +295,7 @@ class DatabaseTest {
                 fileName = "12345.json",
                 cricSheet = cricSheetWithFielders(listOf(Player(name = "Fielder"), Player(name = "Fielder")))
             )
+            adapter.complete()
         }
 
         val sql = Files.readString(output)
@@ -226,6 +311,7 @@ class DatabaseTest {
                 fileName = "12345.json",
                 cricSheet = cricSheetWithFielder(Player(name = null, substitute = true))
             )
+            adapter.complete()
         }
 
         val sql = Files.readString(output)
@@ -233,8 +319,7 @@ class DatabaseTest {
             "INSERT INTO people (id, source_person_id, full_name, sort_name_part, other_name_part, ca_id) VALUES (5, 'unknown', '[substitute]', '[substitute]', '', 0);"
         )
         expectThat(sql).contains(
-            "INSERT INTO delivery_fielders (delivery_id, wicket_id, person_id) VALUES (1, 1, 5) " +
-                    "ON CONFLICT (delivery_id, wicket_id, person_id) DO NOTHING;"
+            "INSERT INTO delivery_fielders (delivery_id, wicket_id, person_id) VALUES (1, 1, 5);"
         )
     }
 
@@ -272,6 +357,18 @@ class DatabaseTest {
     }
 
     @Test
+    fun `given a Turkish default locale when parsing uppercase initials then casing remains locale independent`() {
+        val originalLocale = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+
+            expectThat(getNameParts("INDIA Smith")).isEqualTo("Smith" to "INDIA")
+        } finally {
+            Locale.setDefault(originalLocale)
+        }
+    }
+
+    @Test
     fun `given match with powerplays when match is written then powerplay is stored in deliveries`() {
         val output = Files.createTempFile("warehouse", ".sql")
 
@@ -280,6 +377,7 @@ class DatabaseTest {
                 fileName = "12345.json",
                 cricSheet = cricSheetWithPowerplays()
             )
+            adapter.complete()
         }
 
         val sql = Files.readString(output)
@@ -319,7 +417,7 @@ class DatabaseTest {
         expectThat(officials.firstOrNull()?.id).isEqualTo("non-striker-id")
     }
 
-    private class FailingMatchOutputAdapter : OutputAdapter {
+    private class FailingMatchOutputAdapter(private val failPeopleWrites: Boolean = false) : OutputAdapter {
         var matchStarted = false
         var rollbackRequested = false
         var commitRequested = false
@@ -330,6 +428,7 @@ class DatabaseTest {
             canonicalMatchId: CanonicalMatchId,
             publicMatchId: com.knowledgespike.ballbyball.types.values.PublicMatchId
         ) = Unit
+        override fun reconcileSourceCaId(canonicalMatchId: CanonicalMatchId, sourceCaId: SourceCaId?) = Unit
         override fun upsertPerson(sourceId: String, fullName: String, caId: Int): Long = 1
         override fun upsertTeam(name: String): Team = teams.getOrPut(name) { Team(teams.size + 1L, name) }
         override fun upsertGround(name: String): Ground = throw IllegalStateException("Simulated match write failure")
@@ -349,7 +448,12 @@ class DatabaseTest {
         override fun insertDeliveryWicket(deliveryId: Long, wicketId: Long) = Unit
         override fun insertDeliveryFielder(deliveryId: Long, wicketId: Long, personId: Long) = Unit
         override fun insertMatchPerson(matchId: Long, personId: Long, roleCode: String) = Unit
-        override fun writeAllPeople(people: Sequence<PersonEntity>) = Unit
+        override fun writeAllPeople(people: Sequence<PersonEntity>) {
+            if (failPeopleWrites) {
+                people.first()
+                throw IllegalStateException("Simulated people write failure")
+            }
+        }
         override fun beginMatch() {
             matchStarted = true
         }
@@ -370,6 +474,7 @@ class DatabaseTest {
                 fileName = "12345.json",
                 cricSheet = matchData
             )
+            adapter.complete()
         }
         return Files.readString(output)
     }

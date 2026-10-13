@@ -69,7 +69,7 @@ The API route is:
 
 ### Collision policy
 
-`dim_match.public_match_id` has a **unique constraint**.
+`matches.public_match_id` has a **unique constraint**.
 
 If two different canonical UUIDs map to the same ten-digit value, import
 **fails loudly**. The loader does **not** probe for another free number.

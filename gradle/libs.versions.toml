@@ -20,6 +20,7 @@ ktor-version = "3.5.2"
 kover-version = "0.9.9"
 logback-version = "1.6.3"
 maria-db-version = "3.5.10"
+mysql-connector-version = "9.4.0"
 nimbus-jwt-version = "10.9"
 nimbus-oidc-version = "11.37.1"
 node-gradle-version = "7.1.0"
@@ -28,6 +29,7 @@ pitest-version = "1.19.0"
 postgres-version = "42.7.13"
 sqlite-version = "3.53.4.0"
 strikt-version = "0.35.1"
+testcontainers-version = "1.21.3"
 update-version-version = "0.61.0"
 
 [libraries]
@@ -68,12 +70,16 @@ ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback-version" }
 logback-core = { module = "ch.qos.logback:logback-core", version.ref = "logback-version" }
 mariadb = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = "maria-db-version" }
+mysql-connector = { module = "com.mysql:mysql-connector-j", version.ref = "mysql-connector-version" }
 nimbus-jose-jwt = { module = "com.nimbusds:nimbus-jose-jwt", version.ref = "nimbus-jwt-version" }
 nimbus-oauth2-oidc-sdk = { module = "com.nimbusds:oauth2-oidc-sdk", version.ref = "nimbus-oidc-version" }
 pitest-junit5-plugin = { module = "org.pitest:pitest-junit5-plugin", version.ref = "pitest-junit5-version" }
 postgres = { module = "org.postgresql:postgresql", version.ref = "postgres-version" }
 sqlite = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-version" }
 strikt = { module = "io.strikt:strikt-core", version.ref = "strikt-version" }
+testcontainers-mysql = { module = "org.testcontainers:mysql", version.ref = "testcontainers-version" }
+testcontainers-mariadb = { module = "org.testcontainers:mariadb", version.ref = "testcontainers-version" }
+testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers-version" }
 
 [plugins]
 catalog-update = { id = "nl.littlerobots.version-catalog-update", version.ref = "catalog-update-version-version" }

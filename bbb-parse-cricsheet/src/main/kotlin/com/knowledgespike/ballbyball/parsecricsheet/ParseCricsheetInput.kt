@@ -10,8 +10,33 @@ import java.nio.file.Path
 data class ParseCricsheetInput(
     val baseDirectory: Path,
     val inputDirectory: Path,
-    val outputDirectory: Path
-)
+    val outputDirectory: Path,
+    val notParsedDirectory: Path,
+    val statsConnectionString: String,
+    val statsUserName: String? = null,
+    val statsPasswordEnvironmentVariable: String? = null,
+    val bbbConnectionString: String,
+    val bbbUserName: String? = null,
+    val bbbPasswordEnvironmentVariable: String? = null
+) {
+    internal val layout: ParseDirectoryLayout =
+        parseDirectoryLayout(inputDirectory, outputDirectory, notParsedDirectory)
+
+    internal companion object {
+        fun fromDirectories(inputDirectory: Path, outputDirectory: Path, notParsedDirectory: Path): ParseCricsheetInput {
+            val baseDirectory = inputDirectory.toAbsolutePath().normalize().parent
+                ?: inputDirectory.toAbsolutePath().normalize()
+            return ParseCricsheetInput(
+                baseDirectory = baseDirectory,
+                inputDirectory = inputDirectory,
+                outputDirectory = outputDirectory,
+                notParsedDirectory = notParsedDirectory,
+                statsConnectionString = "",
+                bbbConnectionString = ""
+            )
+        }
+    }
+}
 
 object ParseCricsheetArguments {
     fun options(): Options = Options().apply {
@@ -40,24 +65,98 @@ object ParseCricsheetArguments {
                 .desc("relative normalized output directory")
                 .get()
         )
+        addOption(
+            Option.builder("np")
+                .longOpt("not-parsed")
+                .hasArg()
+                .argName("directory")
+                .desc("relative output directory for raw files that could not be parsed")
+                .get()
+        )
+        addOption(
+            Option.builder("scs")
+                .longOpt("stats-connection-string")
+                .hasArg()
+                .argName("jdbc-url")
+                .desc("JDBC connection string for the CricketArchive stats database")
+                .get()
+        )
+        addOption(
+            Option.builder("su")
+                .longOpt("stats-user-name")
+                .hasArg()
+                .argName("username")
+                .desc("CricketArchive stats database username")
+                .get()
+        )
+        addOption(
+            Option.builder("sp")
+                .longOpt("stats-password-environment-variable")
+                .hasArg()
+                .argName("environment-variable")
+                .desc("environment variable containing the CricketArchive stats database password")
+                .get()
+        )
+        addOption(
+            Option.builder("bcs")
+                .longOpt("bbb-connection-string")
+                .hasArg()
+                .argName("jdbc-url")
+                .desc("JDBC connection string for the ball-by-ball alias database")
+                .get()
+        )
+        addOption(
+            Option.builder("bu")
+                .longOpt("bbb-user-name")
+                .hasArg()
+                .argName("username")
+                .desc("ball-by-ball alias database username")
+                .get()
+        )
+        addOption(
+            Option.builder("bp")
+                .longOpt("bbb-password-environment-variable")
+                .hasArg()
+                .argName("environment-variable")
+                .desc("environment variable containing the ball-by-ball alias database password")
+                .get()
+        )
     }
 
     fun parse(args: Array<String>): ParseCricsheetInput {
         val commandLine = DefaultParser().parse(options(), args)
         val baseDirectory = absoluteBaseDirectory(commandLine.requiredValue("bd", "base-directory"))
-        return ParseCricsheetInput(
-            baseDirectory = baseDirectory,
-            inputDirectory = childDirectory(
-                baseDirectory,
-                commandLine.requiredValue("i", "input"),
-                "--input"
-            ),
-            outputDirectory = childDirectory(
-                baseDirectory,
-                commandLine.requiredValue("o", "output"),
-                "--output"
-            )
+        val inputDirectory = childDirectory(
+            baseDirectory,
+            commandLine.requiredValue("i", "input"),
+            "--input"
         )
+        val outputDirectory = childDirectory(
+            baseDirectory,
+            commandLine.requiredValue("o", "output"),
+            "--output"
+        )
+        val notParsedDirectory = childDirectory(
+            baseDirectory,
+            commandLine.requiredValue("np", "not-parsed"),
+            "--not-parsed"
+        )
+        return try {
+            ParseCricsheetInput(
+                baseDirectory = baseDirectory,
+                inputDirectory = inputDirectory,
+                outputDirectory = outputDirectory,
+                notParsedDirectory = notParsedDirectory,
+                statsConnectionString = commandLine.requiredValue("scs", "stats-connection-string"),
+                statsUserName = commandLine.getOptionValue("stats-user-name"),
+                statsPasswordEnvironmentVariable = commandLine.getOptionValue("stats-password-environment-variable"),
+                bbbConnectionString = commandLine.requiredValue("bcs", "bbb-connection-string"),
+                bbbUserName = commandLine.getOptionValue("bbb-user-name"),
+                bbbPasswordEnvironmentVariable = commandLine.getOptionValue("bbb-password-environment-variable")
+            )
+        } catch (exception: IllegalArgumentException) {
+            throw ParseException(exception.message)
+        }
     }
 
     private fun absoluteBaseDirectory(value: String): Path {
@@ -74,11 +173,22 @@ object ParseCricsheetArguments {
             throw ParseException("$option must be relative to --base-directory")
         }
         val resolved = baseDirectory.resolve(path).normalize()
-        if (!resolved.startsWith(baseDirectory)) {
+        val physicalBase = try {
+            resolvePhysicalPath(baseDirectory)
+        } catch (exception: IllegalArgumentException) {
+            throw ParseException(exception.message)
+        }
+        val physicalResolved = try {
+            resolvePhysicalPath(resolved)
+        } catch (exception: IllegalArgumentException) {
+            throw ParseException(exception.message)
+        }
+        if (!physicalResolved.startsWith(physicalBase)) {
             throw ParseException("$option must resolve within --base-directory")
         }
         return resolved
     }
+
 
     private fun pathValue(value: String?, option: String): Path {
         if (value.isNullOrBlank()) {

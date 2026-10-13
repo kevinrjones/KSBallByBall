@@ -1,4 +1,1096 @@
+# Project memory
+
+## Current task entry
+
+See [`project_memory/2026-10-12-parse-cricsheet-dotenv.md`](project_memory/2026-10-12-parse-cricsheet-dotenv.md) for the current task's shipped changes, decisions, gotchas, and test coverage. The preceding entries are [`project_memory/2026-10-12-fixme-p2-resolution.md`](project_memory/2026-10-12-fixme-p2-resolution.md), [`project_memory/2026-10-12-fixme-p2-docs-source-system.md`](project_memory/2026-10-12-fixme-p2-docs-source-system.md), [`project_memory/2026-10-12-open-fixme-p1-p2.md`](project_memory/2026-10-12-open-fixme-p1-p2.md), [`project_memory/2026-10-12-fixme-p2-p3.md`](project_memory/2026-10-12-fixme-p2-p3.md), [`project_memory/2026-10-11-fixme-p2-closure.md`](project_memory/2026-10-11-fixme-p2-closure.md), [`project_memory/2026-10-10-fixme-p1-p2-remediation.md`](project_memory/2026-10-10-fixme-p1-p2-remediation.md), and [`project_memory/2026-10-09-write-path-unification.md`](project_memory/2026-10-09-write-path-unification.md).
+
+The historical log below is retained for traceability. At more than 5,700 lines it should be archived by dated task rather than extended with future long-form completion reports.
+
 # Project Memory
+
+## Task: Fix CSV journal durability P1
+
+### Title
+
+Force CSV publication journal directory metadata
+
+### Date/time completed
+
+2026-10-09 07:27
+
+### What was shipped
+
+- CSV publication journal replacement now forces the journal's parent directory
+  after the durable temporary-file rename.
+- Added an injectable directory-sync seam and regression coverage asserting that
+  each publication journal phase synchronizes the containing directory.
+
+### Key decisions
+
+- Reused the existing SQL replacement durability pattern: force journal file
+  contents, replace the journal, then force its parent directory where the file
+  system supports directory synchronization.
+- Kept custom journal writers and existing publication recovery semantics
+  unchanged.
+
+### Gotchas
+
+- Directory synchronization is best-effort on file-system providers that do not
+  support opening directories for `FileChannel.force`.
+
+### Test coverage areas
+
+- CSV publication journal directory synchronization across all three journal
+  phases.
+- Existing CSV publication rollback and restart-recovery behavior.
+- Focused CSV tests passed; full project check is run as final verification.
+
+## Task: Fix alias and SQL replacement P1s
+
+### Title
+
+Prevent ambiguous alias links and destructive SQL recovery
+
+### Date/time completed
+
+2026-10-09 07:17
+
+### What was shipped
+
+- Stats match linking now evaluates every alias-derived candidate and rejects
+  conflicting CricketArchive IDs as ambiguous instead of selecting the first.
+- SQL replacement recovery now preserves a target when a `PREPARED` journal has
+  no backup, while active replacement failures still remove a partially moved
+  new file when no previous target existed.
+- Added regression tests for conflicting alias candidates and recovery after a
+  staged file has moved without a backup.
+
+### Key decisions
+
+- Exact team-name lookup remains authoritative and alias candidates are only
+  aggregated after exact lookup fails.
+- Crash recovery is conservative when journal evidence is incomplete; the
+  synchronous rollback path retains its stronger cleanup guarantee.
+
+### Gotchas
+
+- A no-backup journal with an existing target is treated as potentially
+  published output and is not deleted during startup recovery.
+
+### Test coverage areas
+
+- Conflicting alias candidates and existing stats-linking ambiguity behavior.
+- SQL replacement fallback, active rollback, and no-backup restart recovery.
+- Full `./gradlew clean check --no-daemon` passed.
+
+## Task: Consolidate migrations and close adapter rollback gaps
+
+### Title
+
+Consolidate dialect schemas and harden transactional file adapters
+
+### Date/time completed
+
+2026-10-09 06:51
+
+### What was shipped
+
+- Transactional map and set views now track mutations made through entries,
+  keys, values, and iterators so rollback restores the complete prior state.
+- SQL replacement journals are written through forced temporary files and an
+  atomic replacement before the parent directory is forced where supported.
+- CSV temporary, backup, source, and output directory cleanup now fails loudly
+  instead of silently retaining stale files.
+- MySQL, PostgreSQL, and SQLite each now use one consolidated
+  `1__initial_tables.sql` containing aliases and source-match uniqueness; the
+  obsolete follow-up migration files were removed.
+
+### Key decisions
+
+- The consolidated initial schemas express the final clean-database contract
+  directly rather than carrying the inert alias-index removal migration.
+- Mutable collection views remain compatible with the `MutableMap` and
+  `MutableSet` contracts, but all mutation paths pass through transaction
+  tracking.
+
+### Gotchas
+
+- The consolidated migration is intended for the branch's rebuild/fresh-schema
+  workflow; already-applied production migration histories must not be edited
+  without an explicit database migration plan.
+
+### Test coverage areas
+
+- Transactional collection view mutation and rollback.
+- SQLite, MySQL, and PostgreSQL consolidated migration constraints and alias
+  behavior, subject to Docker availability for container-backed tests.
+- SQL replacement and CSV publication recovery paths.
+
+## Task: Make file publication and import rollback scalable
+
+### Title
+
+Restore failed publications and replace full import snapshots with deltas
+
+### Date/time completed
+
+2026-10-08 20:07
+
+### What was shipped
+
+- SQL fallback replacement now records whether the target existed and removes a
+  newly moved output when journal persistence fails without a backup.
+- CSV bundle publication restores the previous bundle when the journal fails
+  after the new directory has been moved into place.
+- File-backed relational state and source-ID state now use first-write undo
+  deltas instead of copying all accumulated maps and delivery keys per match.
+
+### Key decisions
+
+- A completed adapter commit finalizes collection undo logs only after the
+  external transaction or bundle publication succeeds.
+- CSV publication rollback is distinct from crash recovery: a synchronous
+  failure restores the prior bundle, while restart recovery retains its
+  existing journal-phase semantics.
+
+### Gotchas
+
+- Failure-injection tests must fail journal advancement after the source bundle
+  has moved; failures before replacement do not cover the consistency defect.
+- JDBC source-ID undo logs are finalized only after the database commit.
+
+### Test coverage areas
+
+- SQL fallback with and without a previous output file, including interrupted
+  journal recovery.
+- CSV journal failure after publication, bundle cleanup, source-ID rollback,
+  and existing adapter transaction paths.
+- Full `./gradlew clean check --no-daemon` passed.
+
+## Task: Resolve parser and database P2 quality findings
+
+### Title
+
+Unify adapter transactions and harden parser operations
+
+### Date/time completed
+
+2026-10-08 16:18
+
+### What was shipped
+
+- Shared relational state snapshots and a non-reentrant transaction coordinator
+  now serve the JDBC, SQL-script, and CSV adapters.
+- SQL-script replacement uses a journaled backup fallback with restart recovery;
+  parser file processing and stats retry coverage were split into focused seams.
+- Parser database passwords are referenced by environment-variable name rather
+  than passed as plaintext command-line arguments.
+- Added MariaDB repository integration coverage, transaction lifecycle tests,
+  and documentation for nullable CricketArchive enrichment and ambiguity rules.
+
+### Key decisions
+
+- File adapters retain adapter-specific staged output in their snapshots while
+  sharing the common relational model and rollback coordinator.
+- SQL replacement restores the prior file when a fallback publication is
+  interrupted; atomic move remains preferred when supported.
+- MariaDB integration tests skip only when Docker is unavailable locally and run
+  the production-style query assertion in container-enabled environments.
+
+### Gotchas
+
+- Parser invocations must use `--stats-password-environment-variable` and
+  `--bbb-password-environment-variable`; the named variables must be exported.
+- The MariaDB integration test requires Docker to execute rather than skip.
+
+### Test coverage areas
+
+- Full `./gradlew clean check --no-daemon` passed; the MariaDB test was skipped
+  locally because Docker was unavailable.
+- SQL fallback recovery, CSV/JDBC/SQLite rollback and reconciliation, parser
+  path validation, and margin retry behavior are covered.
+
+## Task: Preserve Women's T20 Challenge Match team names
+
+### Title
+
+Do not suffix female Women's T20 Challenge Match team names
+
+### Date/time completed
+
+2026-10-06 09:48
+
+### What was shipped
+
+- Added `Women's T20 Challenge Match` to the female competition exceptions used
+  by `StatsMatchLinker`.
+- Added a SQLite-backed regression proving that both source team names are
+  matched without the standard ` Women` suffix.
+
+### Key decisions
+
+- The exception is an exact event-name match and applies only to female matches;
+  other events retain the normal suffix behavior.
+
+### Gotchas
+
+- A differently formatted event name will not receive this exception.
+
+### Test coverage areas
+
+- Female `Women's T20 Challenge Match` linking against unsuffixed stats team
+  names.
+
+## Task: Try duplicate source-team aliases during stats linking
+
+### Title
+
+Support multiple persistent alias targets for one source team name
+
+### Date/time completed
+
+2026-10-06 09:29
+
+### What was shipped
+
+- `JdbcTeamNameAliasRepository` now returns every alias target for a source
+  system and source team name.
+- `JdbcMatchLinker` validates each target and tries all individual and combined
+  alias candidates in deterministic target order.
+- Alias schemas no longer enforce unique `(source_system, source_team_name)`;
+  compatibility migrations remove the old constraint from existing databases.
+
+### Key decisions
+
+- Duplicate source names are valid integration data because one source name can
+  map to different stats teams in different match contexts.
+- Exact matching remains first, followed by individual aliases and then all
+  combinations of aliases; duplicate stats match rows still use the first ID.
+
+### Gotchas
+
+- Apply `3__allow_duplicate_team_name_aliases.sql` to databases created with the
+  earlier unique alias schema before inserting duplicate source names.
+- Every alias target must still resolve to exactly one stats `Teams.TeamId`.
+
+### Test coverage areas
+
+- A SQLite linker regression inserts two targets for one source name and proves
+  that a later target can resolve the match.
+- Generated SQLite schema accepts duplicate source names while retaining the
+  `stats_team_id` index.
+
+## Task: Preserve the opponent suffix for The Blaze matches
+
+### Title
+
+Leave only The Blaze unsuffixed in female matches
+
+### Date/time completed
+
+2026-10-06 09:14
+
+### What was shipped
+
+- Female matches containing the exact source team name `The Blaze` now skip the
+  standard ` Women` suffix only for that team during stats linking.
+- Opposing teams continue to receive the standard suffix when their stats name
+  requires it.
+- Updated the SQLite-backed linker regression to require an opponent named
+  `Team B Women`.
+
+### Key decisions
+
+- The exception is applied to each team name independently: only the exact
+  source name `The Blaze` bypasses suffixing.
+- The existing event-specific exceptions and normal female suffix behavior for
+  other matches remain unchanged.
+
+### Gotchas
+
+- The exception uses the exact source team name `The Blaze`; differently named
+  or formatted teams continue through the normal suffix rule.
+
+### Test coverage areas
+
+- Female `The Blaze` matches resolve with an unsuffixed `The Blaze` and a
+  suffixed opponent.
+
+## Task: Parse Nepal Premier League without stats lookup
+
+### Title
+
+Allow Nepal Premier League files to parse successfully without a stats representation
+
+### Date/time completed
+
+2026-10-05 16:36
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now bypasses stats linking for the exact `Nepal Premier
+  League` event name in all seasons.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- `Nepal Premier League` is an exact event-name exception because its matches
+  have no stats representation.
+- The normal conversion and output flow remains unchanged for bypassed matches.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- A parser regression verifies that `Nepal Premier League` skips the stats
+  linker, writes the normalized file to `parsed`, leaves `not-parsed` empty, and
+  sets `sourceCaId` to null.
+
+## Task: Parse Major League Cricket 2023 without stats lookup
+
+### Title
+
+Allow Major League Cricket 2023 files to parse successfully without a stats representation
+
+### Date/time completed
+
+2026-10-05 16:30
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now bypasses stats linking for `Major League Cricket`
+  matches in season `2023`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- The exception requires the exact event name and exact season; other Major
+  League Cricket seasons continue through normal stats linking.
+- The normal conversion and output flow remains unchanged for bypassed matches.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name or season will not receive the
+  bypass.
+
+### Test coverage areas
+
+- A parser regression verifies that the 2023 event skips the stats linker,
+  writes the normalized file to `parsed`, leaves `not-parsed` empty, and sets
+  `sourceCaId` to null.
+
+## Task: Parse Continental Cup without stats lookup
+
+### Title
+
+Allow Continental Cup files to parse successfully without a stats representation
+
+### Date/time completed
+
+2026-10-05 14:53
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now bypasses stats linking for the exact `Continental
+  Cup` event name in all seasons.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- `Continental Cup` is an exact event-name exception because no season was
+  specified and the event has no stats representation across its occurrences.
+- The normal conversion and output flow remains unchanged for bypassed matches.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- A parser regression verifies that `Continental Cup` skips the stats linker,
+  writes the normalized file to `parsed`, leaves `not-parsed` empty, and sets
+  `sourceCaId` to null.
+
+## Task: Parse additional competitions without stats lookup
+
+### Title
+
+Allow additional competitions without stats representations to parse successfully
+
+### Date/time completed
+
+2026-10-05 14:39
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now bypasses stats linking for `East Asia Cup` matches
+  in seasons `2016/17` and `2018`, `ICC World Twenty20 Africa Region Qualifier
+  C` in `2018/19`, `ICC World Cricket League Americas Region Division One
+  Twenty20` in `2010`, and `ACC Twenty20 Cup` in `2014/15`.
+- `Stan Nagaiah Trophy` matches bypass stats linking in all seasons.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- Season-specific exceptions require both an exact event name and exact season;
+  other seasons continue through normal stats linking.
+- `Stan Nagaiah Trophy` is an exact event-name exception because no season was
+  specified and the event has no stats representation across its occurrences.
+- The normal conversion and output flow remains unchanged for bypassed matches.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name or season will not receive a
+  season-scoped bypass.
+
+### Test coverage areas
+
+- Parser regressions verify that each requested exception skips the stats linker,
+  writes the normalized file to `parsed`, leaves `not-parsed` empty, and sets
+  `sourceCaId` to null.
+- Existing control coverage verifies that non-exempt seasons still attempt stats
+  linking and preserve failed raw files.
+
+## Task: Parse additional regional qualifiers without stats lookup
+
+### Title
+
+Allow ICC World Twenty20 Europe Region Qualifier C, Americas Sub Regional
+Qualifier A, and Asia Region Qualifier B files to parse successfully
+
+### Date/time completed
+
+2026-10-05 14:29
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact Cricsheet events
+  `ICC World Twenty20 Europe Region Qualifier C`, `ICC World Twenty20 Americas
+  Sub Regional Qualifier A`, and `ICC World Twenty20 Asia Region Qualifier B`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- The three events extend the parser's exact-name set for competitions without
+  a stats representation, preserving the normal conversion and output flow.
+- All other event names continue through the configured stats linker.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- Parser regressions verify that the stats linker is not called for each event,
+  each file is written to `parsed`, `not-parsed` remains empty, and
+  `sourceCaId` is null.
+
+## Task: Parse Asian Games Men's Cricket Competition 2014/15 without stats lookup
+
+### Title
+
+Allow Asian Games Men's Cricket Competition files from season 2014/15 to parse successfully
+
+### Date/time completed
+
+2026-10-05 14:23
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact event
+  `Asian Games Men's Cricket Competition` when the season is `2014/15`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- The bypass is scoped to both the exact event name and season, preserving
+  normal stats linking for the event in other seasons.
+- The normal conversion and output flow remains unchanged for the bypassed
+  matches.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name or season will not receive the
+  bypass.
+
+### Test coverage areas
+
+- Parser regressions verify that the stats linker is not called for season
+  `2014/15`, the file is written to `parsed`, `not-parsed` remains empty, and
+  `sourceCaId` is null.
+- A control regression verifies that another season still attempts stats
+  linking and preserves the failed raw file.
+
+## Task: Parse ICC World Twenty20 Europe Region Qualifiers without stats lookup
+
+### Title
+
+Allow ICC World Twenty20 Europe Region Qualifier A and B files to parse successfully
+
+### Date/time completed
+
+2026-10-05 14:20
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact Cricsheet events
+  `ICC World Twenty20 Europe Region Qualifier A` and `ICC World Twenty20 Europe
+  Region Qualifier B`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- Both events are part of the parser's exact-name set for competitions without
+  a stats representation, preserving the normal conversion and output flow.
+- All other event names continue through the configured stats linker.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- Parser regressions verify that the stats linker is not called for either
+  qualifier, each file is written to `parsed`, `not-parsed` remains empty, and
+  `sourceCaId` is null.
+
+## Task: Parse ICC World Twenty20 East Asia-Pacific Region Qualifiers without stats lookup
+
+### Title
+
+Allow ICC World Twenty20 East Asia-Pacific Region Qualifier A and B files to parse successfully
+
+### Date/time completed
+
+2026-10-05 14:14
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact Cricsheet events
+  `ICC World Twenty20 East Asia-Pacific Region Qualifier A` and `ICC World
+  Twenty20 East Asia-Pacific Region Qualifier B`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- Both events are part of the parser's exact-name set for competitions without
+  a stats representation, preserving the normal conversion and output flow.
+- All other event names continue through the configured stats linker.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- Parser regressions verify that the stats linker is not called for either
+  qualifier, each file is written to `parsed`, `not-parsed` remains empty, and
+  `sourceCaId` is null.
+
+## Task: Parse ICC World Twenty20 Africa Region Qualifier B without stats lookup
+
+### Title
+
+Allow ICC World Twenty20 Africa Region Qualifier B files to parse successfully
+
+### Date/time completed
+
+2026-10-05 14:09
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact Cricsheet event
+  `ICC World Twenty20 Africa Region Qualifier B`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- The event is part of the parser's exact-name set for competitions without a
+  stats representation, preserving the normal conversion and output flow.
+- All other event names continue through the configured stats linker.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- A parser regression verifies that the stats linker is not called, the file is
+  written to `parsed`, `not-parsed` remains empty for it, and `sourceCaId` is
+  null.
+
+## Task: Parse ICC World Twenty20 Africa Region Qualifier A without stats lookup
+
+### Title
+
+Allow ICC World Twenty20 Africa Region Qualifier A files to parse successfully
+
+### Date/time completed
+
+2026-10-05 14:06
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact Cricsheet event
+  `ICC World Twenty20 Africa Region Qualifier A`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- The event is part of the parser's exact-name set for competitions without a
+  stats representation, preserving the normal conversion and output flow.
+- All other event names continue through the configured stats linker.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- A parser regression verifies that the stats linker is not called, the file is
+  written to `parsed`, `not-parsed` remains empty for it, and `sourceCaId` is
+  null.
+
+## Task: Parse ICC World Twenty20 Asia Region Qualifier A without stats lookup
+
+### Title
+
+Allow ICC World Twenty20 Asia Region Qualifier A files to parse successfully
+
+### Date/time completed
+
+2026-10-05 14:01
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact Cricsheet event
+  `ICC World Twenty20 Asia Region Qualifier A`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- The event is part of the parser's exact-name set for competitions without a
+  stats representation, preserving the normal conversion and output flow.
+- All other event names continue through the configured stats linker.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- A parser regression verifies that the stats linker is not called, the file is
+  written to `parsed`, `not-parsed` remains empty for it, and `sourceCaId` is
+  null.
+
+## Task: Parse East Asia Cup 2016/17 without stats lookup
+
+### Title
+
+Allow the East Asia Cup 2016/17 files to parse successfully
+
+### Date/time completed
+
+2026-10-05 13:55
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact Cricsheet event
+  `East Asia Cup` when its season is `2016/17`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- The exception is constrained by both event name and season; other East Asia
+  Cup seasons continue through normal stats linking.
+- The bypass remains at the parser linking boundary so conversion,
+  canonicalization, and output handling are unchanged.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed event or differently formatted season will not receive the bypass.
+
+### Test coverage areas
+
+- A parser regression verifies that the exact event and season skip the stats
+  linker and are written to `parsed` with a null `sourceCaId`.
+- A second regression verifies that another East Asia Cup season still invokes
+  stats linking and is preserved under `not-parsed` when linking fails.
+
+## Task: Parse Kenya T20 Quadrangular Series without stats lookup
+
+### Title
+
+Allow Kenya T20 Quadrangular Series files to parse successfully
+
+### Date/time completed
+
+2026-10-05 13:52
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact Cricsheet
+  `event.name` `Kenya T20 Quadrangular Series`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- The event is part of the parser's exact-name set for competitions without a
+  stats representation, preserving the normal conversion and output flow.
+- All other event names continue through the configured stats linker.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- A parser regression verifies that the stats linker is not called, the file is
+  written to `parsed`, `not-parsed` remains empty for it, and `sourceCaId` is
+  null.
+
+## Task: Parse ICC World Cricket League Europe Region Division Two Twenty20 without stats lookup
+
+### Title
+
+Allow unsupported stats competition files to parse successfully
+
+### Date/time completed
+
+2026-10-05 13:46
+
+### What was shipped
+
+- `bbb-parse-cricsheet` now skips stats linking for the exact Cricsheet
+  `event.name` `ICC World Cricket League Europe Region Division Two Twenty20`.
+- These files are written to the parsed output with an empty nullable
+  `sourceCaId` instead of being copied to `not-parsed`.
+
+### Key decisions
+
+- The exception is implemented at the parser linking boundary so the normal
+  conversion, canonicalization, and parsed-output flow remains unchanged.
+- The event name comparison is exact; all other events continue through the
+  configured stats linker.
+
+### Gotchas
+
+- These matches intentionally have no CricketArchive `CaId` and will therefore
+  remain unlinked when loaded into the ball-by-ball database.
+- A renamed or differently formatted event name will not receive the bypass.
+
+### Test coverage areas
+
+- A parser regression verifies that the stats linker is not called, the file is
+  written to `parsed`, `not-parsed` remains empty for it, and `sourceCaId` is
+  null.
+
+## Task: Accept duplicate stats match rows
+
+### Title
+
+Use the first stats match when duplicate rows are found
+
+### Date/time completed
+
+2026-10-05 09:17
+
+### What was shipped
+
+- Duplicate exact or alias-assisted stats matches now log a warning and use the
+  first `CaId` ordered by `CaId`.
+- Missing matches and invalid or ambiguous alias targets continue to fail.
+
+### Key decisions
+
+- Duplicate match rows are treated as a data-quality issue rather than a parse
+  failure so the rest of the source files can be processed.
+- The warning includes the lookup criteria and all duplicate `CaId` values.
+
+### Gotchas
+
+- The first result is deterministic by ascending `CaId`, not by database row
+  insertion order.
+- Duplicate rows may still require cleanup in the stats database; accepting the
+  first result does not merge or modify those records.
+
+### Test coverage areas
+
+- Exact-name duplicate matches return the first `CaId`.
+- Alias-assisted duplicate matches return the first `CaId`.
+
+## Task: Preserve Rachael Heyhoe Flint Trophy team names
+
+### Title
+
+Skip the women’s team-name suffix for Rachael Heyhoe Flint Trophy matches
+
+### Date/time completed
+
+2026-10-04 17:52
+
+### What was shipped
+
+- Added Rachael Heyhoe Flint Trophy to the female competition exceptions used
+  by stats match linking.
+- Female Rachael Heyhoe Flint Trophy team names now remain unchanged instead
+  of receiving a ` Women` suffix before the stats lookup.
+
+### Key decisions
+
+- The exception is keyed by the Cricsheet `event.name` value
+  `Rachael Heyhoe Flint Trophy`, leaving the normal female naming rule
+  unchanged for other competitions.
+
+### Gotchas
+
+- This applies to the `odms_json` competition naming convention and does not
+  replace persistent aliases for other team-name mismatches.
+
+### Test coverage areas
+
+- Female Rachael Heyhoe Flint Trophy matches link successfully when stats team
+  names omit the ` Women` suffix.
+
+## Task: Preserve Charlotte Edwards Cup team names
+
+### Title
+
+Skip the women’s team-name suffix for CEC matches
+
+### Date/time completed
+
+2026-10-04 16:44
+
+### What was shipped
+
+- Added Charlotte Edwards Cup to the female competition exceptions used by
+  stats match linking.
+- Female CEC team names now remain unchanged instead of receiving a ` Women`
+  suffix before the stats lookup.
+
+### Key decisions
+
+- The exception is keyed by the Cricsheet `event.name` value
+  `Charlotte Edwards Cup`, leaving the normal female naming rule unchanged for
+  other competitions.
+
+### Gotchas
+
+- This handles competition naming convention differences; it does not replace
+  persistent aliases for other team-name mismatches.
+
+### Test coverage areas
+
+- Female Charlotte Edwards Cup matches link successfully when stats team names
+  omit the ` Women` suffix.
+
+## Task: Retry stats lookups without victory margin
+
+### Title
+
+Recover matches whose stats victory margin differs from Cricsheet
+
+### Date/time completed
+
+2026-10-04 16:27
+
+### What was shipped
+
+- Added a second stats-match lookup when the date, teams, and `Matches.HowMuch`
+  criteria find no row; the retry keeps date and interchangeable team matching
+  but omits the margin.
+- Added a dedicated lookup-failure logger that reports the margin miss and any
+  final failure to the console and `logs/lookup_failures.log`.
+- Configured the lookup log with the existing parser rotation policy: 10 MB
+  file size, 60-day history, and 20 GB total-size cap.
+
+### Key decisions
+
+- Only `StatsMatchNotFoundException` triggers the no-margin retry; ambiguous
+  matches and invalid alias targets remain explicit failures.
+- The existing per-file continuation and raw-file preservation behavior is
+  unchanged when both lookup attempts fail.
+
+### Gotchas
+
+- A no-margin match is accepted only after the margin-constrained lookup logs a
+  miss; this fallback is not fuzzy matching and does not create aliases.
+- Lookup logs are emitted by the parser-specific logger and are not duplicated
+  into `application.log`.
+
+### Test coverage areas
+
+- Exact match recovery after a victory-margin mismatch.
+- Final no-margin failure message and existing ambiguity/alias-target failures.
+- Parser Logback configuration for the dedicated console and rotating file
+  appenders.
+
+## Task: Separate parsed and not-parsed Cricsheet output
+
+### Title
+
+Continue parsing after per-file failures and preserve failed raw inputs
+
+### Date/time completed
+
+2026-10-04 15:05
+
+### What was shipped
+
+- Added the required `--not-parsed` parser directory alongside `--output` for
+  successful normalized files.
+- Changed per-file conversion, linking, and output failures to be logged and
+  accumulated without stopping later files.
+- Copied failed raw JSON files to the matching relative path below
+  `--not-parsed` and logged a final accumulated error summary.
+
+### Key decisions
+
+- Failed inputs are copied rather than moved so the original raw archive remains
+  available for correction and retry.
+- A non-zero process result is retained when any file fails, even though the
+  parser completes the rest of the batch.
+
+### Gotchas
+
+- `--not-parsed` is a required safe relative child directory of
+  `--base-directory`; rerun the parser after correcting aliases or source data.
+
+### Test coverage areas
+
+- Generic conversion failures and missing stats matches continue to later files.
+- Parsed output is separated from failed raw input, including mirrored nested
+  paths and exact raw file contents.
+- CLI parsing captures the additional not-parsed directory.
+
+## Task: Persist team-name aliases for stats linking
+
+### Title
+
+Store reusable Cricsheet-to-stats team aliases in the ball-by-ball database
+
+### Date/time completed
+
+2026-10-04 14:29
+
+### What was shipped
+
+- Added `team_name_aliases` migrations for MySQL, PostgreSQL, and SQLite, plus
+  generated relational-schema support with duplicate source names and an
+  indexed stable stats-team target.
+- Added alias-aware `JdbcMatchLinker` resolution using a second ball-by-ball
+  JDBC connection, while preserving exact matching and `sourceCaId` output.
+- Added parser options and runtime wiring for separate stats and ball-by-ball
+  connections, with operator documentation for manual alias insertion and
+  retrying failed parses.
+
+### Key decisions
+
+- The ball-by-ball database owns integration aliases; the stats database remains
+  the source of truth and aliases target stable `Teams.TeamId` values.
+- Exact matching runs first. Aliases are manual, reusable by source system and
+  source team name, and are used only when exact matching finds no row; all
+  targets for a source name are considered.
+- Alias targets are validated at parse time and must resolve to exactly one stats
+  team; no cross-database foreign key or automatic fuzzy mapping is used.
+- Cricsheet aliases use provider namespace UUID
+  `f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b` as `source_system`.
+
+### Gotchas
+
+- Parser invocations now require both `--stats-connection-string` and
+  `--bbb-connection-string`; credentials are supplied through the corresponding
+  optional username and password options and are not logged.
+- Migrations `2__team_name_aliases.sql` and
+  `3__allow_duplicate_team_name_aliases.sql` must be applied before manual alias
+  inserts. An invalid or ambiguous target remains a fatal parse error.
+
+### Test coverage areas
+
+- Generated SQLite schema columns, duplicate source names, and target index.
+- Exact, partial, two-sided reverse-order, missing, ambiguous, and invalid-target
+  JDBC linker behavior.
+- Parser argument capture for both database connection configurations.
+
+## Task: Link parsed matches to CricketArchive stats
+
+### Title
+
+Resolve `source_ca_id` during Cricsheet parsing
+
+### Date/time completed
+
+2026-10-04 08:22
+
+### What was shipped
+
+- Added a JDBC stats matcher to `bbb-parse-cricsheet` using the two team names,
+  match date, and victory margin, then writes the resolved `Matches.CaId` to
+  `match.sourceCaId`.
+- Propagated `sourceCaId` through `bbb-update-database` into
+  `matches.source_ca_id` and added a unique constraint for the one-to-one link
+  in all supported relational dialects.
+- Added parser, JDBC lookup, and relational column-order tests plus CLI and
+  architecture documentation for the required stats database connection.
+
+### Key decisions
+
+- Victory type is deliberately excluded from matching because the two systems
+  use different victory-type vocabularies.
+- Missing or ambiguous stats matches are logged and terminate parsing rather
+  than producing an unlinked normalized match.
+
+### Gotchas
+
+- The parser now requires `--stats-connection-string`; credentials are passed
+  with the optional `--stats-user-name` and `--stats-password` options.
+
+### Test coverage areas
+
+- Successful and missing JDBC match lookups, parser envelope linking, and
+  relational `source_ca_id` column ordering.
 
 ## Task: Consolidate relational migrations
 
@@ -4030,3 +5122,629 @@ Store innings declarations and append `dec` to scorecard card scores
 - Database insert coverage verifies declared innings output.
 - API/shared contract and jOOQ mapping checks pass with the new field.
 - Angular presenter coverage verifies `565/6 dec`; full `clean check` passed.
+
+## Task: Resolve thermo-nuclear quality review findings
+
+### Title
+
+Remove structural regressions from parser routing, team naming, migrations, and warehouse replay
+
+### Date/time completed
+
+2026-10-06 20:08
+
+### What was shipped
+
+- Made parsed/not-parsed routing authoritative by removing the stale counterpart
+  whenever a file changes from success to failure or failure to success.
+- Centralized female team-name exceptions in `TeamNamePolicy` and replaced the
+  parser's growing event-condition chain with data-driven `StatsLookupPolicy`.
+- Restored initial migration immutability, removed live alias data from schema
+  migrations, and added additive migration `4__unique_source_ca_id.sql` for
+  existing databases.
+- Added source-ID reconciliation to JDBC, SQL-script, and CSV output adapters so
+  replay can backfill a missing `sourceCaId` and reject conflicting ownership.
+
+### Key decisions
+
+- Alias migrations define structure only; operator-owned mappings remain explicit
+  data managed outside versioned schema files.
+- A source ID is reconciled before idempotent early return, preserving existing
+  match identity while allowing a later parser retry to complete the link.
+- The same team-name policy is used for stats lookup and warehouse normalization.
+
+### Gotchas
+
+- Existing databases must apply migration `4__unique_source_ca_id.sql`; editing
+  the old initial migration is intentionally no longer the upgrade path.
+- Reconciliation updates an existing CSV row by rewriting `matches.csv`, while
+  SQL-script output emits an explicit `UPDATE` statement.
+
+### Test coverage areas
+
+- Parser output transitions between `parsed` and `not-parsed`.
+- CSV and SQL-script source-ID reconciliation and existing updater behavior.
+- Existing parser, linker, and updater suites continued to pass after the
+  structural refactor.
+
+## Task: Close final quality-review blockers
+
+### Title
+
+Make parser boundaries, adapters, and migration verification deterministic
+
+### Date/time completed
+
+2026-10-07 17:20
+
+### What was shipped
+
+- Parser arguments now reject overlapping input, parsed, and not-parsed paths
+  and require both JDBC connection strings before application startup.
+- Stats linking policy is separated from JDBC match queries and alias data
+  access; the ball-by-ball alias connection is explicitly read-only.
+- CSV and SQL-script source-ID reconciliation is staged until commit, with
+  rollback/retry coverage and one atomic CSV replacement for pending updates.
+- Alias migration 2 now represents the predecessor unique-name schema and
+  migration 3 removes that constraint; dialect integration tests cover the
+  MySQL and PostgreSQL sequences when Docker is available.
+
+### Key decisions
+
+- Required parser settings fail as command-line `ParseException` values rather
+  than later `requireNotNull` startup failures.
+- Migration compatibility is tested from the schema state produced by the
+  preceding migration instead of manufacturing a hidden predecessor state in
+  a test.
+
+### Gotchas
+
+- MySQL and PostgreSQL migration tests are skipped when Testcontainers cannot
+  access a working Docker server; they execute fully in a Docker-enabled CI
+  environment.
+- Existing SQL-script and CSV output callers must use the adapter transaction
+  lifecycle so staged source-ID updates are committed.
+
+### Test coverage areas
+
+- Parser path overlap and required connection setting validation.
+- Linker repository composition, CSV atomic replacement, and SQL-script
+  rollback behavior.
+- SQLite migration upgrades plus Docker-backed MySQL/PostgreSQL migration
+  execution and idempotence.
+
+## Task: Make non-JDBC match output transactional
+
+### Title
+
+Stage CSV and SQL-script output until a match commits
+
+### Date/time completed
+
+2026-10-07 16:27
+
+### What was shipped
+
+- CSV adapters now stage rows in memory and publish replacement files only from
+  `commit`, restoring both files and in-memory indexes if publication fails.
+- SQL-script adapters now write to a temporary script and publish it only when
+  the adapter closes successfully; rollback truncates staged statements and
+  restores generated-key and lookup state.
+- Added end-to-end `Database.writeMatch` regressions proving that failures after
+  match rows are staged do not leave partial CSV files or SQL inserts.
+
+### Key decisions
+
+- A match transaction includes all relational output, not only source-ID
+  reconciliation; `beginMatch`, `commit`, and `rollback` cover the complete
+  adapter state.
+- Generated SQL remains unpublished until the complete script is closed, while
+  CSV commits use temporary replacements and restore prior files if any table
+  publication fails.
+
+### Gotchas
+
+- Non-JDBC callers must use the adapter lifecycle and close the adapter to
+  publish output; uncommitted staged output is intentionally discarded on
+  failure.
+
+### Test coverage areas
+
+- CSV replacement failure and source-ID retry behavior.
+- SQL-script reconciliation rollback and staged-script publication.
+- Database-level failures after match rows were staged for both adapters.
+- Full `./gradlew clean check --no-daemon` and `git diff --check` passed.
+
+## Task: Publish CSV tables as one relational bundle
+
+### Title
+
+Make CSV commits atomic across the relational dataset
+
+### Date/time completed
+
+2026-10-07 16:37
+
+### What was shipped
+
+- CSV commits now copy the current output into a staged directory, replace all
+  changed tables there, and publish the complete directory as one bundle.
+- Directory publication keeps the previous output directory available for
+  restoration when the bundle swap fails, preventing mixed table generations.
+- Added regression coverage for one publication per multi-table commit and for
+  preserving every existing CSV table after a failed publication.
+
+### Key decisions
+
+- The CSV output directory is the transaction boundary because the relational
+  dataset consists of multiple interdependent table files.
+- In-memory indexes are updated only after the bundle is published successfully;
+  rollback restores the pre-transaction state.
+
+### Gotchas
+
+- The output directory is briefly swapped as a whole rather than replacing
+  individual files, so readers should open a dataset after publication begins.
+
+### Test coverage areas
+
+- Multi-table bundle publication and failed-publication rollback.
+- Existing CSV source-ID reconciliation and retry behavior.
+
+## Task: Close final database quality blockers
+
+### Title
+
+Make adapter transactions mandatory and verify durable database output
+
+### Date/time completed
+
+2026-10-07 16:47
+
+### What was shipped
+
+- Made `beginMatch` and `rollback` mandatory operations on every
+  `OutputAdapter` implementation.
+- Added a durable CSV publication journal with restart recovery for interrupted
+  directory swaps, including recovery regression coverage.
+- Made MySQL and PostgreSQL migration tests fail rather than skip when their
+  required database runtime is unavailable, and configured Docker API
+  compatibility plus the MySQL test driver.
+
+### Key decisions
+
+- CSV publication retains the prior directory until the journal records a
+  completed replacement, allowing startup recovery after a process crash.
+- Dialect migration coverage is part of the normal test contract rather than
+  an optional local check.
+
+### Gotchas
+
+- MySQL and PostgreSQL migration tests require Docker and use Testcontainers;
+  Docker API `1.44` is configured for current Docker 29 environments.
+- CSV publication metadata and recovery artifacts are kept beside the output
+  directory while a swap is in progress.
+
+### Test coverage areas
+
+- Mandatory transaction lifecycle across JDBC, CSV, and SQL-script adapters.
+- Interrupted CSV publication recovery and failed bundle publication.
+- MySQL and PostgreSQL migration execution, duplicate aliases, and repeatable
+  source-ID uniqueness migrations.
+- Full `./gradlew clean check --no-daemon` and `git diff --check` passed.
+
+## Task: Enforce parser input and output boundaries
+
+### Title
+
+Protect direct parser callers from overlapping directory trees
+
+### Date/time completed
+
+2026-10-07 17:09
+
+### What was shipped
+
+- Added a shared `ParseDirectoryLayout` validator for parser and CLI directory
+  configuration.
+- `CricSheetParser.parse` now normalizes paths and rejects equal or nested
+  input, parsed-output, and not-parsed directories before creating outputs or
+  walking input files.
+- Added direct parser regressions for equal and nested input/output paths.
+
+### Key decisions
+
+- Directory safety is enforced at the public parser boundary rather than only
+  at command-line argument parsing, protecting library callers as well.
+- The parser operates on normalized absolute paths after validation so relative
+  direct calls cannot bypass the same overlap rules.
+
+### Gotchas
+
+- Output directories must remain disjoint from the input tree and from each
+  other; this prevents retries from re-ingesting generated or preserved files.
+
+### Test coverage areas
+
+- Direct parser rejection of equal and nested directory configurations.
+- Existing parser routing and CLI boundary tests.
+- Full `./gradlew clean check --no-daemon` and `git diff --check` passed.
+
+## Task: Extract the CSV bundle publisher
+
+### Title
+
+Separate CSV publication from relational transaction coordination
+
+### Date/time completed
+
+2026-10-07 19:48
+
+### What was shipped
+
+- Extracted `CsvBundlePublisher` from `CsvOutputAdapter`.
+- Moved CSV serialization, complete-bundle staging, atomic directory publication,
+  durable journal writing, interrupted-publication recovery, and output
+  preparation into the publisher.
+- Kept relational indexes, transaction snapshots, commit/rollback decisions, and
+  source-ID reconciliation in `CsvOutputAdapter`.
+
+### Key decisions
+
+- The adapter passes pending rows and updated match rows to the publisher only
+  during commit; in-memory state is still updated after successful publication.
+- The publisher remains injectable through the existing publication callback
+  seam, preserving failure-injection coverage without coupling adapter tests to
+  journal implementation details.
+
+### Gotchas
+
+- `CsvBundlePublisher` must retain the durable journal and restart recovery
+  behavior because directory publication can be interrupted between swaps.
+
+### Test coverage areas
+
+- Multi-table bundle publication and failed-publication rollback.
+- Source-ID reconciliation retry after publication failure.
+- Interrupted publication recovery through the extracted publisher boundary.
+- Full `./gradlew clean check --no-daemon` and `git diff --check` passed.
+
+## Task: Add parser application lifecycle seams
+
+### Title
+
+Make parser startup wiring and cleanup boundary-testable
+
+### Date/time completed
+
+2026-10-07 20:05
+
+### What was shipped
+
+- Injected database-connection and parser factories into `Application.execute`.
+- Preserved the production factories that open the stats connection normally,
+  open the ball-by-ball alias connection read-only, construct `JdbcMatchLinker`,
+  and run `CricSheetParser`.
+- Added application boundary tests for missing arguments, successful dual-
+  connection wiring, read-only alias configuration, and parser failure cleanup.
+
+### Key decisions
+
+- The application owns the connection lifecycle while factories provide a small
+  test seam; parser code remains unchanged and still receives JDBC connections.
+- The parser factory is created only after both connections are open, so the
+  existing nested resource scopes close both handles on parser construction or
+  execution failure.
+
+### Gotchas
+
+- Missing command-line settings must return the argument-error status before any
+  database factory is invoked.
+
+### Test coverage areas
+
+- Successful parser application wiring and result status.
+- Read-only configuration of the ball-by-ball alias connection.
+- Cleanup of both database handles after parser failure.
+- Application argument failure without opening connections.
+
+## Task: Clean up failed CSV bundle creation
+
+### Title
+
+Remove temporary CSV bundles after staging failures
+
+### Date/time completed
+
+2026-10-07 20:04
+
+### What was shipped
+
+- Moved temporary bundle creation inside a cleanup-safe scope in
+  `CsvBundlePublisher`.
+- Added injectable copy and table-writer seams so staging failures can be
+  exercised without changing production publication behavior.
+- Added regressions proving failed CSV copying and table serialization remove
+  their temporary `.csv-bundle-*` directories.
+
+### Key decisions
+
+- The publisher always deletes the temporary bundle from `finally` after the
+  directory has been created, including failures before publication begins.
+- Production copying and table serialization continue to use the existing
+  filesystem implementations; injection is limited to focused tests.
+
+### Gotchas
+
+- A failure creating the temporary directory itself cannot leave a bundle because
+  no directory has been created yet; cleanup begins immediately afterward.
+
+### Test coverage areas
+
+- Existing-file copy failure during bundle staging.
+- Changed-table serialization failure during bundle staging.
+- Full `./gradlew clean check --no-daemon` and `git diff --check` passed.
+
+## Task: Separate stats linking policy from JDBC composition
+
+### Title
+
+Make stats match linking policy independently testable
+
+### Date/time completed
+
+2026-10-07 20:13
+
+### What was shipped
+
+- Added `StatsMatchLookupPolicy` as a pure deterministic planner for exact,
+  individual-alias, and combined-alias candidates.
+- Added `StatsTeamAliasResolver` and moved stats-team target validation out of
+  `JdbcMatchLinker`.
+- Changed `JdbcMatchLinker` to accept repository seams, while retaining its
+  production constructor for separate stats and ball-by-ball JDBC connections.
+- Added policy tests for exact-first ordering and multiple alias targets.
+
+### Key decisions
+
+- JDBC repositories are now constructed only by the connection-based adapter
+  constructor; lookup policy tests do not require a database.
+- Alias target validation remains fail-fast and uses the injected stats
+  repository before an alias becomes a lookup candidate.
+- Existing candidate ordering, margin retry, duplicate selection, and logging
+  behavior remain unchanged.
+
+### Gotchas
+
+- The production compatibility constructor creates the validating alias
+  resolver with the stats repository needed to validate stable `TeamId` values;
+  callers with alternate data sources can inject their own resolver.
+
+### Test coverage areas
+
+- Exact, individual-alias, combined-alias, and duplicate-alias candidate order.
+- Existing JDBC linker integration scenarios, including invalid targets,
+  duplicate matches, reverse ordering, and margin retry.
+- Full `./gradlew clean check --no-daemon` and `git diff --check`.
+
+## Task: Preserve exact-first stats lookup
+
+### Title
+
+Prefer exact team names over alias resolution
+
+### Date/time completed
+
+2026-10-07 20:19
+
+### What was shipped
+
+- Changed `JdbcMatchLinker` to execute the exact two-team-name lookup before
+  resolving persistent aliases.
+- Added a regression proving an exact `CaId` is returned even when an alias
+  resolver would reject a stale target.
+
+### Key decisions
+
+- Alias validation remains fail-fast when the exact lookup cannot resolve the
+  match; stale aliases must not prevent a valid exact match.
+- Alias candidate ordering remains delegated to `StatsMatchLookupPolicy` after
+  the exact candidate has returned no result.
+
+### Gotchas
+
+- The margin retry applies the same exact-first ordering to its retry criteria.
+
+### Test coverage areas
+
+- Exact lookup call order with an invalid alias target.
+- Existing alias, duplicate-result, reverse-order, and margin-retry scenarios.
+
+## Task: Harden output reconciliation and parser linking
+
+### Title
+
+Make source linking mandatory and output moves portable
+
+### Date/time completed
+
+2026-10-07 20:31
+
+### What was shipped
+
+- Added an `AtomicMoveNotSupportedException` fallback for SQL-script output replacement.
+- Made `CricSheetParser` require a `MatchLinker`; isolated parser tests now pass an explicitly named no-op linker.
+- Centralized source CA-ID validation, ownership, pending updates, snapshots, commit promotion, and rollback restoration in `SourceCaIdState`, used by JDBC, SQL-script, and CSV adapters.
+
+### Key decisions
+
+- Adapter-specific persistence remains local while the shared state component commits pending assignments only after the output callback succeeds.
+- Pending assignments for different canonical matches cannot claim the same source CA ID, and failed persistence leaves assignments retryable.
+
+### Gotchas
+
+- JDBC still queries the database as the source of truth; its shared state snapshot is restored alongside JDBC rollback.
+
+### Test coverage areas
+
+- Atomic-move fallback, source-ID ownership conflicts, snapshot restoration, and retry after persistence failure.
+- Parser, SQL-script, CSV, and JDBC adapter regression suites.
+
+## Task: Open stats connection read-only
+
+### Title
+
+Prevent unnecessary write access to the stats database
+
+### Date/time completed
+
+2026-10-08 07:08
+
+### What was shipped
+
+- Changed the Cricsheet parser application to request the stats database
+  connection as read-only.
+- Kept the existing read-only setting for the ball-by-ball database unchanged.
+
+### Key decisions
+
+- Stats matching is query-only, so its connection now uses the same read-only
+  boundary as the other database used by the parser.
+
+### Gotchas
+
+- Database drivers still determine how strictly the JDBC read-only hint is
+  enforced; the application now supplies the correct intent to the connection
+  layer.
+
+### Test coverage areas
+
+- Application connection wiring asserts both stats and ball-by-ball connections
+  are opened read-only.
+- Full `./gradlew clean check --no-daemon` passed.
+
+## Task: Reject ambiguous marginless stats matches
+
+### Title
+
+Prevent nondeterministic stats match linking when the result margin is absent
+
+### Date/time completed
+
+2026-10-08 07:15
+
+### What was shipped
+
+- Preserved a missing Cricsheet result margin as `null` instead of converting it
+  to zero.
+- Added explicit `StatsMatchAmbiguousException` handling when a lookup returns
+  multiple distinct stats `CaId` values.
+- Avoided retrying an already marginless lookup with identical criteria.
+
+### Key decisions
+
+- A match without a source margin may link only when the team/date lookup
+  produces one distinct stats match; the linker no longer chooses the first row.
+- The same ambiguity rule applies to exact and aliased team lookup candidates.
+
+### Gotchas
+
+- Existing callers must resolve duplicate same-day team matches before parsing
+  can produce a linked envelope; the parser records the explicit lookup failure.
+
+### Test coverage areas
+
+- Marginless single-match resolution and margin-mismatch fallback.
+- Ambiguous exact and aliased matches, including candidates with different
+  stored margins.
+- Full `StatsMatchLinkerTest` suite passed; `git diff --check` passed.
+
+## Task: Resolve database and code-quality FIXMEs
+
+### Title
+
+Resolve SQL, pooling, transaction, adapter, and stats lookup issues
+
+### Date/time completed
+
+2026-10-09 10:12
+
+### What was shipped
+
+- SQL script bindings now substitute placeholders in one pass, and datasource
+  pools are cached concurrently by connection URL and credentials.
+- Transaction undo logs are private to their collections; relational snapshots
+  now contain only counters, with rollback retained for SQL and CSV adapters.
+- Output adapters use `RelationalOutputState` directly, source-reference change
+  detection is delegated to shared state, and MariaDB table templates emit an
+  explicit InnoDB suffix.
+- Stats alias candidates are separate from exact candidates; database upsert
+  wrappers were removed, and name classification uses `Locale.ROOT`.
+- All eight findings in `docs/FIXME.md` are marked resolved.
+
+### Key decisions
+
+- Used `ConcurrentHashMap.computeIfAbsent` with a composite URL/user/password
+  key so concurrent initialization shares pools without credential collisions.
+- Kept transaction logs internal and made snapshots scalar-only rather than
+  copying every relational map.
+- Preserved exact-first stats matching while removing caller dependence on
+  candidate ordering.
+
+### Gotchas
+
+- Passwords are part of datasource cache keys held in memory, consistent with
+  the existing Hikari configuration that already retains credentials.
+- `Locale.ROOT` makes the uppercase comparison independent of the process
+  locale; the Turkish-locale test confirms expected name classification.
+
+### Test coverage areas
+
+- Regression test for question marks in SQL literals; writer rejects mismatched
+  placeholder/value counts.
+- Concurrent datasource cache access and credential-separated cache entries.
+- Transactional map/set rollback, snapshot counter restoration, and adapter
+  match rollback.
+- MariaDB versus SQLite DDL, stats exact/alias lookup, and database name parsing.
+- Full `./gradlew clean check --no-daemon` and `git diff --check` passed.
+
+### Maintenance note (2026-10-09)
+- `docs/project_memory.md` remains the live rolling log; prefer short sprint entries here and move deep narrative to dated files under `docs/memory/` when this file exceeds comfortable review size (~this file is large—trim historical sprint prose in a follow-up if needed).
+
+## Task: Consolidate dialect schema migrations
+
+### Title
+
+Use one initial schema migration per database dialect
+
+### Date/time completed
+
+2026-10-12 16:11
+
+### What was shipped
+
+- Folded the team-alias triple unique index into `1__initial_tables.sql` for
+  MySQL, PostgreSQL, and SQLite, and removed each dialect's second migration.
+- Updated migration tests and architecture documentation for the single-file
+  schema.
+
+### Key decisions
+
+- Keep dialect-specific idempotency: conditional index creation in MySQL and
+  `CREATE UNIQUE INDEX IF NOT EXISTS` in PostgreSQL and SQLite.
+- Preserve distinct team targets for one source alias while rejecting repeated
+  `(source_system, source_team_name, stats_team_id)` triples.
+
+### Gotchas
+
+- This branch's migration consolidation is intended for fresh/rebuilt databases;
+  do not replay the edited baseline against a database with prior Flyway history.
+- One PostgreSQL Testcontainers connection attempt failed during SSL setup, but
+  the isolated rerun and final project-wide check passed.
+
+### Test coverage areas
+
+- Migration DDL application and duplicate-alias rejection in MySQL, PostgreSQL,
+  and SQLite.
+- Alias preservation, relational schema parity, and full
+  `./gradlew clean check --no-daemon` validation.

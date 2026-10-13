@@ -66,7 +66,7 @@ CREATE TABLE dim_match
 (
     match_key            BIGINT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
     canonical_match_id   CHAR(36)        NULL,
-    source_ca_id         VARCHAR(10)     NULL,
+    source_ca_id         VARCHAR(20)     NULL,
     file_name            VARCHAR(120)    NOT NULL,
     match_in_series      INT             NOT NULL,
     match_type           VARCHAR(15)     NOT NULL,

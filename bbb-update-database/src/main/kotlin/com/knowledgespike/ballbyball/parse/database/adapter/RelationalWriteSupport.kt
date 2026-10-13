@@ -10,11 +10,8 @@ import java.util.Locale
 
 internal object RelationalWriteSupport {
     val PERSON_COLUMNS = listOf("id", "source_person_id", "full_name", "sort_name_part", "other_name_part", "ca_id")
-    val PERSON_JDBC_COLUMNS = PERSON_COLUMNS.drop(1)
     val TEAM_COLUMNS = listOf("id", "source_team_id", "team_name")
-    val TEAM_JDBC_COLUMNS = TEAM_COLUMNS.drop(1)
     val GROUND_COLUMNS = listOf("id", "source_ground_id", "ground_name")
-    val GROUND_JDBC_COLUMNS = GROUND_COLUMNS.drop(1)
     val DATE_COLUMNS = listOf(
         "date_id", "calendar_date", "calendar_year", "calendar_quarter", "calendar_month",
         "month_name", "week_of_year", "day_of_month", "day_of_week", "day_name", "is_weekend"
@@ -25,25 +22,20 @@ internal object RelationalWriteSupport {
         "balls_per_over", "added_timestamp", "team1_id", "team2_id", "ground_id", "toss_team_id",
         "toss_decision", "victory_type", "winner_team_id", "loser_team_id", "duration_days", "margin", "match_count"
     )
-    val MATCH_JDBC_COLUMNS = MATCH_COLUMNS.drop(1)
     val SOURCE_REFERENCE_COLUMNS = listOf(
         "match_id", "provider", "provider_record_key", "source_record_id", "raw_content_digest"
     )
     val INNINGS_COLUMNS = listOf(
         "id", "match_id", "innings_number", "batting_team_id", "bowling_team_id", "declared"
     )
-    val INNINGS_JDBC_COLUMNS = INNINGS_COLUMNS.drop(1)
     val WICKET_COLUMNS = listOf("id", "source_wicket_id", "wicket_kind")
-    val WICKET_JDBC_COLUMNS = WICKET_COLUMNS.drop(1)
     val DELIVERY_COLUMNS = listOf(
         "id", "source_ball_id", "match_id", "match_date_id", "innings_id", "batting_team_id",
         "bowling_team_id", "batter_id", "non_striker_id", "bowler_id", "over_number", "ball_number",
         "ball_in_over", "innings_order", "batter_runs", "extra_runs", "total_runs", "no_balls", "wides",
         "byes", "leg_byes", "non_boundary", "powerplay", "wicket_count"
     )
-    val DELIVERY_JDBC_COLUMNS = DELIVERY_COLUMNS.drop(1)
     val MATCH_PERSON_COLUMNS = listOf("id", "match_id", "person_id", "role_code")
-    val MATCH_PERSON_INSERT_COLUMNS = MATCH_PERSON_COLUMNS.drop(1)
     val DELIVERY_WICKET_COLUMNS = listOf("delivery_id", "wicket_id")
     val DELIVERY_FIELDER_COLUMNS = listOf("delivery_id", "wicket_id", "person_id")
 
@@ -56,6 +48,7 @@ internal object RelationalWriteSupport {
         declared: Boolean
     ): List<Any?> = listOf(inningsKey, matchId, inningsNumber, battingTeamId, bowlingTeamId, declared)
 
+
     fun insertSql(
         tableName: String,
         columns: List<String>,
@@ -64,6 +57,22 @@ internal object RelationalWriteSupport {
     ): String {
         require(columns.size == values.size) { "Insert columns and values must have the same size" }
         return "$keyword $tableName (${columns.joinToString(", ")}) VALUES (${values.joinToString(", ")})"
+    }
+
+    fun updateSql(
+        tableName: String,
+        columns: List<String>,
+        whereColumns: List<String>,
+        whereValues: List<Any?>
+    ): String {
+        require(columns.isNotEmpty()) { "Update columns must not be empty" }
+        require(whereColumns.isNotEmpty()) { "Update conditions must not be empty" }
+        require(whereColumns.size == whereValues.size) { "Update condition columns and values must have the same size" }
+        val assignments = columns.joinToString(", ") { "$it = ?" }
+        val conditions = whereColumns.zip(whereValues).joinToString(" AND ") { (column, value) ->
+            if (value == null) "$column IS NULL" else "$column = ?"
+        }
+        return "UPDATE $tableName SET $assignments WHERE $conditions"
     }
 
     fun validatePublicMatchId(
@@ -102,13 +111,33 @@ internal object RelationalWriteSupport {
         return existingMatchKey?.let(MatchWriteDecision::Reuse) ?: MatchWriteDecision.Insert
     }
 
+    fun validateSourceCaId(
+        canonicalMatchId: CanonicalMatchId,
+        sourceCaId: String?,
+        existingSourceCaId: String?,
+        sourceCaOwner: CanonicalMatchId?
+    ) {
+        if (sourceCaId == null) return
+        if (existingSourceCaId != null && existingSourceCaId != sourceCaId) {
+            throw InvalidStateException(
+                "Canonical match ${canonicalMatchId.value} already has sourceCaId $existingSourceCaId, " +
+                    "received $sourceCaId"
+            )
+        }
+        if (sourceCaOwner != null && sourceCaOwner != canonicalMatchId) {
+            throw InvalidStateException(
+                "sourceCaId $sourceCaId is already assigned to canonical match ${sourceCaOwner.value}"
+            )
+        }
+    }
+
     fun matchValues(matchKey: Long, match: MatchRecord, addedAt: Any): List<Any?> =
         listOf(matchKey) + matchInsertValues(match, addedAt)
 
     fun matchInsertValues(match: MatchRecord, addedAt: Any): List<Any?> = listOf(
         match.canonicalMatchId.value.toString(),
         match.publicMatchId.value,
-        null,
+        match.sourceCaId?.value,
         match.fileName,
         match.matchInSeries,
         match.matchType,

@@ -84,7 +84,7 @@ CREATE TABLE matches
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     canonical_match_id  CHAR(36) NULL,
     public_match_id     BIGINT NULL,
-    source_ca_id        VARCHAR(10) NULL,
+    source_ca_id        VARCHAR(20) NULL,
     file_name           VARCHAR(120) NOT NULL,
     match_in_series     INTEGER NOT NULL,
     match_type          VARCHAR(15) NOT NULL,
@@ -125,6 +125,7 @@ CREATE INDEX idx_matches_start_date ON matches (match_start_date_id);
 CREATE INDEX idx_matches_team1 ON matches (team1_id);
 CREATE INDEX idx_matches_team2 ON matches (team2_id);
 CREATE INDEX idx_matches_ground ON matches (ground_id);
+CREATE UNIQUE INDEX uq_matches_source_ca_id ON matches (source_ca_id);
 
 CREATE TABLE match_source_reference
 (
@@ -248,3 +249,14 @@ CREATE TABLE delivery_fielders
 );
 CREATE INDEX idx_delivery_fielders_wicket ON delivery_fielders (wicket_id);
 CREATE INDEX idx_delivery_fielders_person ON delivery_fielders (person_id);
+
+CREATE TABLE IF NOT EXISTS team_name_aliases
+(
+    source_system    VARCHAR(50)  NOT NULL,
+    source_team_name VARCHAR(100) NOT NULL,
+    stats_team_id    INTEGER      NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_name_aliases_stats_team_id ON team_name_aliases (stats_team_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_team_name_aliases_source_name_team
+    ON team_name_aliases (source_system, source_team_name, stats_team_id);
