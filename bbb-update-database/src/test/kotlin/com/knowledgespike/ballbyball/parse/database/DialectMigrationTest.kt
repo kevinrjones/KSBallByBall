@@ -23,7 +23,7 @@ class DialectMigrationTest {
             DriverManager.getConnection(container.jdbcUrl, container.username, container.password).use { connection ->
                 applyMigration(connection, "mysql", "1__initial_tables.sql")
                 assertDistinctAliasTargetsAreAccepted(connection)
-                assertAliasCount(connection, expected = 2)
+                assertAliasCount(connection, expected = 50)
                 assertDuplicateAliasTriplesAreRejected(connection)
                 assertAliasUniqueIndexExists(connection, expected = true)
                 org.junit.jupiter.api.assertThrows<SQLException> {

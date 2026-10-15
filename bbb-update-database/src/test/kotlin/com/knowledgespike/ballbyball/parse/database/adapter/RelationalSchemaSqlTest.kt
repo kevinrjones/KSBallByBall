@@ -100,6 +100,30 @@ class RelationalSchemaSqlTest {
     }
 
     @Test
+    fun `given generated schemas when rendered then include all migration aliases`() {
+        val expectedAliases = migrationAliasRows("sqlite")
+        val aliasesByDialect = listOf("mysql", "postgres", "sqlite").map(::migrationAliasRows)
+
+        expectThat(aliasesByDialect.distinct()).isEqualTo(listOf(expectedAliases))
+        SqlDialect.entries.forEach { dialect ->
+            val schema = generatedSchema(dialect)
+
+            expectThat(aliasInsertStatements(schema).size).isEqualTo(expectedAliases.size)
+            when (dialect) {
+                SqlDialect.MARIADB -> expectThat(schema).contains("INSERT IGNORE INTO team_name_aliases")
+                SqlDialect.POSTGRES -> expectThat(schema).contains("ON CONFLICT DO NOTHING")
+                SqlDialect.SQLITE -> expectThat(schema).contains("INSERT OR IGNORE INTO team_name_aliases")
+            }
+        }
+
+        DriverManager.getConnection("jdbc:sqlite::memory:").use { connection ->
+            applySchema(connection)
+
+            expectThat(aliasRows(connection)).isEqualTo(expectedAliases)
+        }
+    }
+
+    @Test
     fun `given a saved alias when generated SQLite schema is applied again then alias survives`() {
         DriverManager.getConnection("jdbc:sqlite::memory:").use { connection ->
             applySchema(connection)
@@ -117,7 +141,7 @@ class RelationalSchemaSqlTest {
             connection.createStatement().use { statement ->
                 statement.executeQuery("select count(*) from team_name_aliases").use { result ->
                     result.next()
-                    expectThat(result.getInt(1)).isEqualTo(1)
+                    expectThat(result.getInt(1)).isEqualTo(migrationAliasRows("sqlite").size + 1)
                 }
             }
             assertThrows<SQLException> {
@@ -166,7 +190,6 @@ class RelationalSchemaSqlTest {
         try {
             applySchema(generated)
             applyMigrations(migrated)
-            insertAlias(migrated)
             repeat(2) { applyMigrationAliasStatements(migrated) }
 
             expectThat(tableColumns(generated) - tableColumns(migrated)).isEqualTo(emptySet())
@@ -175,7 +198,8 @@ class RelationalSchemaSqlTest {
             expectThat(indexes(migrated) - indexes(generated)).isEqualTo(emptySet())
             expectThat(foreignKeys(generated) - foreignKeys(migrated)).isEqualTo(emptySet())
             expectThat(foreignKeys(migrated) - foreignKeys(generated)).isEqualTo(emptySet())
-            assertAliasCount(migrated, 1)
+            expectThat(aliasRows(generated)).isEqualTo(aliasRows(migrated))
+            assertAliasCount(migrated, migrationAliasRows("sqlite").size)
         } finally {
             generated.close()
             migrated.close()
@@ -199,6 +223,7 @@ class RelationalSchemaSqlTest {
             }
         }
         assertAliasIndexExists(connection)
+        assertAliasCount(connection, migrationAliasRows("sqlite").size)
 
         connection.createStatement().use { statement ->
             statement.executeUpdate(
@@ -219,6 +244,7 @@ class RelationalSchemaSqlTest {
         applyGeneratedSchema(connection, dialect)
 
         assertAliasQueryReturnsOneRow(connection)
+        assertAliasCount(connection, migrationAliasRows("sqlite").size + 1)
         assertAliasIndexExists(connection)
     }
 
@@ -276,23 +302,16 @@ class RelationalSchemaSqlTest {
 
     private fun applyMigrationAliasStatements(connection: Connection) {
         migrationStatements("sqlite", "1__initial_tables.sql")
-            .filter { it.contains("team_name_aliases", ignoreCase = true) }
+            .filter {
+                it.startsWith("CREATE TABLE IF NOT EXISTS team_name_aliases", ignoreCase = true) ||
+                    it.startsWith("CREATE INDEX IF NOT EXISTS idx_team_name_aliases", ignoreCase = true) ||
+                    it.startsWith("CREATE UNIQUE INDEX IF NOT EXISTS uq_team_name_aliases", ignoreCase = true)
+            }
             .forEach { sql -> connection.createStatement().use { it.execute(sql) } }
     }
 
     private fun migrationStatements(dialect: String, fileName: String): List<String> =
         sqlStatements(Files.readString(Path.of("migrations/$dialect/$fileName")))
-
-    private fun insertAlias(connection: Connection) {
-        connection.prepareStatement(
-            "insert into team_name_aliases (source_system, source_team_name, stats_team_id) values (?, ?, ?)"
-        ).use { statement ->
-            statement.setString(1, AliasSourceSystem.CRICSHEET.value)
-            statement.setString(2, "North Stars")
-            statement.setInt(3, 42)
-            statement.executeUpdate()
-        }
-    }
 
     private fun assertAliasCount(connection: Connection, expected: Int) {
         connection.createStatement().use { statement ->
@@ -309,6 +328,40 @@ class RelationalSchemaSqlTest {
         .split(';')
         .map(String::trim)
         .filter(String::isNotEmpty)
+
+    private fun migrationAliasRows(dialect: String): List<AliasRow> = migrationStatements(
+        dialect,
+        "1__initial_tables.sql"
+    ).mapNotNull { statement ->
+        val values = migrationAliasInsertPattern.find(statement)?.groupValues ?: return@mapNotNull null
+        AliasRow(sourceSystem = values[1], sourceTeamName = values[2], statsTeamId = values[3].toInt())
+    }.sortedWith(compareBy(AliasRow::sourceSystem, AliasRow::sourceTeamName, AliasRow::statsTeamId))
+
+    private fun aliasInsertStatements(schema: String): List<String> = sqlStatements(schema)
+        .filter { it.contains("INSERT", ignoreCase = true) && it.contains("team_name_aliases", ignoreCase = true) }
+
+    private fun aliasRows(connection: Connection): List<AliasRow> = connection.prepareStatement(
+        "select source_system, source_team_name, stats_team_id from team_name_aliases " +
+            "order by source_system, source_team_name, stats_team_id"
+    ).use { statement ->
+        statement.executeQuery().use { result ->
+            buildList {
+                while (result.next()) {
+                    add(
+                        AliasRow(
+                            result.getString("source_system"),
+                            result.getString("source_team_name"),
+                            result.getInt("stats_team_id")
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private val migrationAliasInsertPattern = Regex(
+        "(?i)insert\\s+into\\s+team_name_aliases\\s+values\\s*\\('([^']*)',\\s*'([^']*)',\\s*(\\d+)\\)"
+    )
 
     private fun tableNames(connection: Connection): List<String> = connection.createStatement().use { statement ->
         statement.executeQuery("select name from sqlite_master where type = 'table' and name not like 'sqlite_%'")
@@ -385,6 +438,8 @@ class RelationalSchemaSqlTest {
         val defaultValue: String?,
         val primaryKeyOrder: Int
     )
+
+    private data class AliasRow(val sourceSystem: String, val sourceTeamName: String, val statsTeamId: Int)
 
     private data class IndexContract(val table: String, val unique: Boolean, val columns: List<String>)
 

@@ -85,6 +85,10 @@ do not stop remaining files. Expected stats-link outcomes are represented as
 sealed values and mapped at the per-file boundary. Female aliases use raw
 Cricsheet team names; stats-name suffixes and link exclusions are owned by
 their policy resources, linked below.
+Stats linking tries the source date with margin when present and then without;
+if all exact-date attempts miss, it retries ±1 day then ±2 days (earlier before
+later at each distance), trying margin before plain on each date. Ambiguous and
+invalid-alias results stop the fallback.
 Match-link failures show the source alias key and include the stats team name
 when policy changes it. Cricsheet input is decoded once into typed source DTOs
 and explicitly mapped into the shared match contract. A durable-commit failure
@@ -97,6 +101,8 @@ incomplete script abandons its staged output. Generated SQLite scripts are
 applied and read back in the adapter parity tests; generated MariaDB and
 PostgreSQL schemas are applied in Testcontainers to verify their tables, indexes,
 alias uniqueness, and preservation of operator aliases on reapplication.
+Generated rebuild SQL also seeds the 48 baseline Cricsheet team-name aliases
+from the initial migrations, while keeping additional operator aliases intact.
 
 The authoritative stats-link exclusion data is versioned in
 [`bbb-parse-cricsheet/src/main/resources/policies/`](bbb-parse-cricsheet/src/main/resources/policies/).
@@ -352,6 +358,7 @@ execution, and Docker push steps.
 | [0006](docs/adr/0006-persistent-team-name-aliases.md) | Persistent operator-owned team aliases |
 | [0042](docs/adr/0042-relational-match-session-and-sinks.md) | Relational match session and output sinks |
 | [0043](docs/adr/0043-relational-session-jdbc-identity-store.md) | Single write pipeline with JDBC identity store |
+| [0050](docs/adr/0050-stats-match-date-heuristic-lookup.md) | Sequential stats match date fallback |
 
 ## Design notes
 

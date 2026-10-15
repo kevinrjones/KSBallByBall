@@ -1,12 +1,9 @@
 package com.knowledgespike.ballbyball.clishared.identity
 
 import com.knowledgespike.ballbyball.identity.CanonicalMatchId
-import com.knowledgespike.ballbyball.identity.CanonicalNamespaces
 import com.knowledgespike.ballbyball.identity.DeterministicIdentity
-import com.knowledgespike.ballbyball.identity.IdentityError
 import com.knowledgespike.ballbyball.identity.ProviderId
 import com.knowledgespike.ballbyball.identity.ProviderNamespaces
-import com.knowledgespike.ballbyball.identity.PublicNamespaces
 import com.knowledgespike.ballbyball.identity.Sha256Digest
 import com.knowledgespike.ballbyball.identity.SourceRecordId
 import arrow.core.Either

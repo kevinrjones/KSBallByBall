@@ -3,7 +3,6 @@ package com.knowledgespike.ballbyball.parsecricsheet
 import arrow.core.Either
 import com.knowledgespike.ballbyball.clishared.identity.SingleSourceCanonicalizer
 import com.knowledgespike.ballbyball.clishared.identity.SourceMatchEnvelope
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import java.nio.file.AtomicMoveNotSupportedException
@@ -128,7 +127,7 @@ class CricSheetParser(
     private fun linkMatch(
         sourceEnvelope: SourceMatchEnvelope,
         input: Path
-    ): Either<ParseFailure, SourceMatchEnvelope> = when (val result = matchLinker.link(sourceEnvelope.match.match)) {
+    ): Either<ParseFailure, SourceMatchEnvelope> = when (val result = matchLinker.link(sourceEnvelope.match.match, input)) {
         is StatsLinkResult.Linked -> Either.Right(sourceEnvelope.withSourceCaId(result.sourceCaId.value))
         is StatsLinkResult.NotFound -> Either.Left(
             ParseFailure(input, "No stats match found for ${result.criteria}")

@@ -274,9 +274,11 @@ immediately, accumulated, and do not stop the remaining files. Conversion and
 output failures are also reported and processing continues, but cannot produce
 a normalized file. A final error summary is logged and the parser exits
 non-zero when any file failed.
-Lookup-specific failures, including the margin retry, are written to both the
-console and `logs/lookup_failures.log`; that file uses the same 10 MB rotation,
-60-day history, and 20 GB total-size cap as `logs/application.log`.
+Lookup-specific errors are written to `logs/lookup_errors.log`, while all other
+lookup messages (including informational and warning messages) are written to
+`logs/lookup_general.log`; both files use the same 10 MB rotation, 60-day
+history, and 20 GB total-size cap as `logs/application.log`. Lookup messages
+continue to be written to the console.
 
 ```bash
 ./gradlew :bbb-parse-cricsheet:run --no-daemon \

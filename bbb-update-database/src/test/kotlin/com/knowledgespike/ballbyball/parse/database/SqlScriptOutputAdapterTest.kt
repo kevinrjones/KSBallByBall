@@ -19,7 +19,6 @@ import strikt.assertions.isGreaterThan
 import strikt.assertions.isEqualTo
 import java.nio.file.Files
 import java.sql.DriverManager
-import java.sql.SQLException
 import java.time.LocalDate
 import java.util.UUID
 
@@ -310,7 +309,9 @@ class SqlScriptOutputAdapterTest {
         expectThat(sql).contains(
             "INSERT INTO delivery_fielders (delivery_id, wicket_id, person_id) VALUES (1, 2, 3);"
         )
-        expectThat(sql.contains("ON CONFLICT")).isEqualTo(false)
+        expectThat(sql).contains("ON CONFLICT DO NOTHING")
+        expectThat(sql.contains("INSERT INTO match_people (id, match_id, person_id, role_code) VALUES (1, 1, 1, 'player') ON CONFLICT"))
+            .isEqualTo(false)
         expectThat(sql).contains("START TRANSACTION;")
     }
 

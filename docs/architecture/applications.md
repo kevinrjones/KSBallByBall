@@ -57,10 +57,15 @@ provider-namespace UUID `f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b` as
 `match_source_reference`. Validated target IDs are combined with the
 stats-facing names into one set-based alias query, preserving home/away
 interchangeability. A margin-constrained `NotFound` is retried as a plain second
-attempt without `Matches.HowMuch`. `sourceCaId` is optional CricketArchive
-enrichment in the otherwise source-neutral payload and remains null for skipped
-or unlinked matches. Final expected link failures fail that file but still
-write its normalized envelope with a null `sourceCaId`.
+attempt without `Matches.HowMuch`. If all exact-primary-date attempts return
+`NotFound`, the linker tries exact dates one day before, one day after, two days
+before, then two days after the primary Cricsheet date, trying the original
+margin before a plain lookup on each alternate date. The first `Linked`, `Ambiguous`, or `InvalidAlias` result
+stops the cascade; SQL continues to use exact `MatchStartDate` equality, and
+policy-skipped matches do not enter lookup. `sourceCaId` is optional
+CricketArchive enrichment in the otherwise source-neutral payload and remains
+null for skipped or unlinked matches. Final expected link failures fail that
+file but still write its normalized envelope with a null `sourceCaId`.
 
 `TeamNamePolicy` owns female stats-name shaping and reads
 `policies/female-competition-exceptions.txt` and
@@ -92,10 +97,12 @@ creates aliases.
 
 Each dialect's `1__initial_tables.sql` migration creates the alias table with
 `IF NOT EXISTS` (without dropping it), its lookup index, the source-match
-uniqueness constraint, and the unique alias triple index. Operator-owned alias
-data is not seeded into versioned schema files. The updater reconciles a newly
-available `sourceCaId` during idempotent re-imports through JDBC, SQL-script,
-and CSV adapters and rejects conflicting assignments. The shared
+uniqueness constraint, and the unique alias triple index. The migrations seed
+the baseline Cricsheet team aliases, and generated rebuild SQL inserts the same
+rows idempotently without dropping the alias table or replacing additional
+operator-managed aliases. The updater reconciles a newly available `sourceCaId`
+during idempotent re-imports through JDBC, SQL-script, and CSV adapters and
+rejects conflicting assignments. The shared
 `TeamNamePolicy` is used by parser linking and warehouse normalization so female
 competition and team exceptions cannot drift between stages.
 

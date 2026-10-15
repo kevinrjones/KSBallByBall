@@ -85,6 +85,7 @@ class JdbcStatsMatchRepository(private val connection: Connection) : StatsMatchR
           $marginPredicate
           AND ((${firstTeam.predicate("home_team")} AND ${secondTeam.predicate("away_team")})
             OR (${secondTeam.predicate("home_team")} AND ${firstTeam.predicate("away_team")}))
+            AND MatchType not in ('t', 'wt', 'o', 'wo', 'itt', 'witt')
         ORDER BY m.CaId
         """.trimIndent()
     }

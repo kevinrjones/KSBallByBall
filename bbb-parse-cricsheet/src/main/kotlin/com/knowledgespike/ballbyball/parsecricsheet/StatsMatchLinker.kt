@@ -4,11 +4,12 @@ import com.knowledgespike.ballbyball.clishared.schema.Info
 import com.knowledgespike.ballbyball.clishared.schema.TeamNamePolicy
 import com.knowledgespike.ballbyball.identity.SourceCaId
 import org.slf4j.LoggerFactory
+import java.nio.file.Path
 import java.sql.Connection
 import java.time.LocalDate
 
 fun interface MatchLinker {
-    fun link(match: Info): StatsLinkResult
+    fun link(match: Info, input: Path): StatsLinkResult
 }
 
 sealed interface StatsLinkResult {
@@ -31,24 +32,50 @@ class StatsMatchLinker(
     private val log = LoggerFactory.getLogger(StatsMatchLinker::class.java)
     private val lookupFailureLog = LoggerFactory.getLogger(LOOKUP_FAILURE_LOGGER)
 
-    override fun link(match: Info): StatsLinkResult {
+    override fun link(match: Info, input: Path): StatsLinkResult {
         if (!StatsMatchLinkPolicy.shouldLink(match)) return StatsLinkResult.Skipped
         val criteria = MatchLookupCriteria.from(match)
         log.debug("Looking up stats match for {}", criteria)
         return try {
-            val firstAttempt = lookup(criteria)
-            val result = if (firstAttempt is StatsLinkResult.NotFound && criteria.margin != null) {
-                lookupFailureLog.warn("Stats match lookup with margin failed for {}; retrying without margin", criteria)
-                lookup(criteria.copy(margin = null))
+            val exactDateResult = lookupWithMarginFallback(criteria)
+            val result = if (exactDateResult is StatsLinkResult.NotFound) {
+                lookupWithDateHeuristics(criteria, exactDateResult)
             } else {
-                firstAttempt
+                exactDateResult
             }
-            logResult(criteria, result)
+            logResult(criteria, result, input)
             result
         } catch (exception: Exception) {
             lookupFailureLog.error("Stats match lookup failed for {}", criteria, exception)
             throw exception
         }
+    }
+
+    private fun lookupWithMarginFallback(criteria: MatchLookupCriteria): StatsLinkResult {
+        val firstAttempt = lookup(criteria)
+        return if (firstAttempt is StatsLinkResult.NotFound && criteria.margin != null) {
+            lookupFailureLog.warn("Stats match lookup with margin failed for {}; retrying without margin", criteria)
+            lookup(criteria.copy(margin = null))
+        } else {
+            firstAttempt
+        }
+    }
+
+    private fun lookupWithDateHeuristics(
+        criteria: MatchLookupCriteria,
+        primaryNotFound: StatsLinkResult.NotFound
+    ): StatsLinkResult {
+        lookupFailureLog.warn("Exact-date stats match lookup failed for {}; trying adjacent dates", criteria)
+        for (date in StatsMatchDateHeuristic.candidateDates(criteria.matchDate)) {
+            val attempt = lookupWithMarginFallback(criteria.copy(matchDate = date))
+            if (attempt !is StatsLinkResult.NotFound) {
+                if (attempt is StatsLinkResult.Linked) {
+                    log.info("Stats match linked using date heuristic for {} on {}", criteria, date)
+                }
+                return attempt
+            }
+        }
+        return primaryNotFound
     }
 
     private fun lookup(criteria: MatchLookupCriteria): StatsLinkResult {
@@ -94,12 +121,12 @@ class StatsMatchLinker(
         }
     }
 
-    private fun logResult(criteria: MatchLookupCriteria, result: StatsLinkResult) {
+    private fun logResult(criteria: MatchLookupCriteria, result: StatsLinkResult, input: Path? = null) {
         when (result) {
             is StatsLinkResult.Linked, StatsLinkResult.Skipped -> Unit
-            is StatsLinkResult.NotFound -> lookupFailureLog.warn("No stats match found for {}", criteria)
+            is StatsLinkResult.NotFound -> lookupFailureLog.error("No stats match found for {} at {}", criteria, input)
             is StatsLinkResult.Ambiguous ->
-                lookupFailureLog.error("Stats match lookup was ambiguous for {}: {}", criteria, result.caIds)
+                lookupFailureLog.info("Stats match lookup was ambiguous for {}: {}", criteria, result.caIds)
 
             is StatsLinkResult.InvalidAlias ->
                 lookupFailureLog.error("Stats team alias was invalid for {}: {}", criteria, result.message)

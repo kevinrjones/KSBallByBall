@@ -4,15 +4,17 @@ import com.knowledgespike.ballbyball.identity.AliasSourceSystem
 import com.knowledgespike.ballbyball.identity.SourceCaId
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import strikt.api.expectThat
 import strikt.assertions.contains
 import strikt.assertions.containsExactly
 import strikt.assertions.isEqualTo
+import java.nio.file.Path
 import java.sql.DriverManager
+import java.time.LocalDate
 
 class StatsMatchLinkerTest {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val input = Path.of("input.json")
 
     @Test
     fun `given an exact match and an invalid alias then exact ca id is returned first`() {
@@ -65,6 +67,185 @@ class StatsMatchLinkerTest {
 
             expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).sourceCaId(source.match))
                 .isEqualTo("ca-12345")
+        }
+    }
+
+    @Test
+    fun `given stats match starts one day before source date then ca id is returned`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertMatch(statsConnection, "ca-before", 1, 2, matchStartDate = "2024-01-31")
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-02-01")
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(
+                    StatsLinkResult.Linked(SourceCaId.from("ca-before"))
+                )
+        }
+    }
+
+    @Test
+    fun `given stats match starts one day after source date then ca id is returned`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertMatch(statsConnection, "ca-after", 1, 2, matchStartDate = "2024-03-24")
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-03-23")
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(
+                    StatsLinkResult.Linked(SourceCaId.from("ca-after"))
+                )
+        }
+    }
+
+    @Test
+    fun `given stats match starts two days before source date then ca id is returned`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertMatch(statsConnection, "ca-two-before", 1, 2, matchStartDate = "2024-01-30")
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-02-01")
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(
+                    StatsLinkResult.Linked(SourceCaId.from("ca-two-before"))
+                )
+        }
+    }
+
+    @Test
+    fun `given stats match starts two days after source date then ca id is returned`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertMatch(statsConnection, "ca-two-after", 1, 2, matchStartDate = "2024-03-25")
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-03-23")
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(
+                    StatsLinkResult.Linked(SourceCaId.from("ca-two-after"))
+                )
+        }
+    }
+
+    @Test
+    fun `given one day and two day alternate stats rows then closer date is preferred`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertMatch(statsConnection, "ca-one-before", 1, 2, matchStartDate = "2024-01-31")
+            insertMatch(statsConnection, "ca-two-before", 1, 2, matchStartDate = "2024-01-30")
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-02-01")
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(
+                    StatsLinkResult.Linked(SourceCaId.from("ca-one-before"))
+                )
+        }
+    }
+
+    @Test
+    fun `given exact date and alternate date stats rows then exact date is preferred`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertMatch(statsConnection, "ca-exact-date", 1, 2, matchStartDate = "2024-02-01")
+            insertMatch(statsConnection, "ca-alternate-date", 1, 2, matchStartDate = "2024-01-31")
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-02-01")
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(
+                    StatsLinkResult.Linked(SourceCaId.from("ca-exact-date"))
+                )
+        }
+    }
+
+    @Test
+    fun `given alternate date margin matches then matching ca id is preferred`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertMatch(statsConnection, "ca-margin-match", 1, 2, howMuch = 100, matchStartDate = "2024-01-31")
+            insertMatch(statsConnection, "ca-margin-mismatch", 1, 2, howMuch = 105, matchStartDate = "2024-01-31")
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-02-01").replace(
+                    "\"outcome\": {\"result\": \"draw\"}",
+                    "\"outcome\": {\"winner\": \"Team A\", \"by\": {\"runs\": 100}}"
+                )
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(
+                    StatsLinkResult.Linked(SourceCaId.from("ca-margin-match"))
+                )
+        }
+    }
+
+    @Test
+    fun `given alternate date has no matching margin then lookup retries without margin`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertMatch(statsConnection, "ca-plain-alternate", 1, 2, howMuch = 105, matchStartDate = "2024-01-31")
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-02-01").replace(
+                    "\"outcome\": {\"result\": \"draw\"}",
+                    "\"outcome\": {\"winner\": \"Team A\", \"by\": {\"runs\": 100}}"
+                )
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(
+                    StatsLinkResult.Linked(SourceCaId.from("ca-plain-alternate"))
+                )
+        }
+    }
+
+    @Test
+    fun `given alternate date has multiple matching stats rows then lookup stops as ambiguous`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertMatch(statsConnection, "ca-before-a", 1, 2, matchStartDate = "2024-01-31")
+            insertMatch(statsConnection, "ca-before-b", 1, 2, matchStartDate = "2024-01-31")
+            insertMatch(statsConnection, "ca-after", 1, 2, matchStartDate = "2024-02-02")
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-02-01")
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(
+                    StatsLinkResult.Ambiguous(
+                        MatchLookupCriteria.from(source.match).copy(matchDate = LocalDate.parse("2024-01-31")),
+                        listOf(SourceCaId.from("ca-before-a"), SourceCaId.from("ca-before-b"))
+                    )
+                )
+        }
+    }
+
+    @Test
+    fun `given no stats matches on primary or alternate dates then lookup keeps primary criteria`() {
+        withDatabases { statsConnection, aliasConnection ->
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument("2024-02-01")
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(StatsLinkResult.NotFound(MatchLookupCriteria.from(source.match)))
         }
     }
 
@@ -137,7 +318,7 @@ class StatsMatchLinkerTest {
                     .replace("\"gender\": \"male\"", "\"gender\": \"female\"")
                     .replace("Team A", "Australia")
             )
-            val result = StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match)
+            val result = StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input)
 
             expectThat(result).isEqualTo(StatsLinkResult.NotFound(MatchLookupCriteria.from(source.match)))
             expectThat((result as StatsLinkResult.NotFound).criteria.toString())
@@ -176,7 +357,7 @@ class StatsMatchLinkerTest {
                 sourceDocument()
             )
 
-            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match))
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
                 .isEqualTo(
                     StatsLinkResult.Ambiguous(
                         MatchLookupCriteria.from(source.match),
@@ -416,7 +597,7 @@ class StatsMatchLinkerTest {
             sourceDocument()
         )
 
-        expectThat(StatsMatchLinker(statsRepository, aliasResolver).link(source.match))
+        expectThat(StatsMatchLinker(statsRepository, aliasResolver).link(source.match, input))
             .isEqualTo(
                 StatsLinkResult.Ambiguous(
                     MatchLookupCriteria.from(source.match),
@@ -437,7 +618,7 @@ class StatsMatchLinkerTest {
                 sourceDocument()
             )
 
-            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match))
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
                 .isEqualTo(
                     StatsLinkResult.Ambiguous(
                         MatchLookupCriteria.from(source.match),
@@ -460,7 +641,7 @@ class StatsMatchLinkerTest {
                 sourceDocument()
             )
 
-            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match))
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
                 .isEqualTo(
                     StatsLinkResult.Ambiguous(
                         MatchLookupCriteria.from(source.match),
@@ -477,7 +658,7 @@ class StatsMatchLinkerTest {
                 sourceDocument()
             )
 
-            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match))
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
                 .isEqualTo(StatsLinkResult.NotFound(MatchLookupCriteria.from(source.match)))
         }
     }
@@ -490,7 +671,7 @@ class StatsMatchLinkerTest {
                 sourceDocument()
             )
 
-            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match))
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
                 .isEqualTo(
                     StatsLinkResult.InvalidAlias(
                         "Alias for Team A targets stats team 999, but no unique stats team was found"
@@ -509,7 +690,7 @@ class StatsMatchLinkerTest {
                 sourceDocument()
             )
 
-            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match))
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).link(source.match, input))
                 .isEqualTo(StatsLinkResult.InvalidAlias("Alias for Team A targets stats team 10, but 2 stats teams were found"))
         }
     }
@@ -525,7 +706,7 @@ class StatsMatchLinkerTest {
     }
 
     private fun StatsMatchLinker.sourceCaId(match: com.knowledgespike.ballbyball.clishared.schema.Info): String =
-        when (val result = link(match)) {
+        when (val result = link(match, input)) {
             is StatsLinkResult.Linked -> result.sourceCaId.value
             else -> error("Expected a linked result, got $result")
         }
@@ -548,7 +729,8 @@ class StatsMatchLinkerTest {
                     HomeTeamId INTEGER NOT NULL,
                     AwayTeamId INTEGER NOT NULL,
                     MatchStartDate TEXT,
-                    HowMuch INTEGER NOT NULL
+                    HowMuch INTEGER NOT NULL,
+                    MatchType TEXT NOT NULL DEFAULT 'tt'
                 )
                 """.trimIndent()
             )
@@ -583,7 +765,8 @@ class StatsMatchLinkerTest {
         caId: String,
         homeTeamId: Int,
         awayTeamId: Int,
-        howMuch: Int = 0
+        howMuch: Int = 0,
+        matchStartDate: String = "2024-01-01"
     ) {
         connection.prepareStatement(
             "INSERT INTO Matches (CaId, HomeTeamId, AwayTeamId, MatchStartDate, HowMuch) VALUES (?, ?, ?, ?, ?)"
@@ -591,7 +774,7 @@ class StatsMatchLinkerTest {
             statement.setString(1, caId)
             statement.setInt(2, homeTeamId)
             statement.setInt(3, awayTeamId)
-            statement.setString(4, "2024-01-01")
+            statement.setString(4, matchStartDate)
             statement.setInt(5, howMuch)
             statement.executeUpdate()
         }
@@ -613,11 +796,11 @@ class StatsMatchLinkerTest {
         }
     }
 
-    private fun sourceDocument() = """
+    private fun sourceDocument(date: String = "2024-01-01") = """
         {
           "match": {
             "ballsPerOver": 6,
-            "dates": ["2024-01-01"],
+            "dates": ["$date"],
             "gender": "male",
             "matchType": "tt",
             "outcome": {"result": "draw"},

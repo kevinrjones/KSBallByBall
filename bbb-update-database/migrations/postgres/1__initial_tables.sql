@@ -284,6 +284,7 @@ insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'S
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Zimbabwe', 31229);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Turks and Caicos Island', 2319);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'South Africa Women', 25291);
+insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'South Africa', 25291);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'South Africa', 10312);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Guyana Amazon Warriors Women', 55513);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Royal Challengers Bengaluru Women', 51559);

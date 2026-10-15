@@ -81,7 +81,7 @@ class SqliteMatchIdentityMigrationTest {
                 statement.executeQuery("select count(*) from team_name_aliases where source_team_name = 'Warriors'")
                     .use { result ->
                         result.next()
-                        expectThat(result.getInt(1)).isEqualTo(2)
+                        expectThat(result.getInt(1)).isEqualTo(3)
                     }
                 statement.executeQuery("pragma index_list('matches')").use { result ->
                     val indexes = buildList {

@@ -1,10 +1,62 @@
 package com.knowledgespike.ballbyball.parse.database.adapter
 
+import com.knowledgespike.ballbyball.identity.AliasSourceSystem
 import java.io.BufferedWriter
 
 internal object RelationalSchemaSql {
     const val DEFAULT_MARIADB_DATABASE_NAME = "acs_ball_by_ball"
     private val mariadbDatabaseNamePattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+    private val teamNameAliasSeeds = listOf(
+        TeamNameAliasSeed("Cumilla Warriors", 45116),
+        TeamNameAliasSeed("Fortune Barishal", 48630),
+        TeamNameAliasSeed("Sylhet Super Stars", 36985),
+        TeamNameAliasSeed("North-West Warriors", 44366),
+        TeamNameAliasSeed("Barbados Tridents", 48094),
+        TeamNameAliasSeed("Trinidad & Tobago Red Steel", 25995),
+        TeamNameAliasSeed("Warriors", 98),
+        TeamNameAliasSeed("Titans", 250),
+        TeamNameAliasSeed("Lions", 125),
+        TeamNameAliasSeed("Knights", 110),
+        TeamNameAliasSeed("Dolphins", 46696),
+        TeamNameAliasSeed("Warriors (FairBreak)", 49084),
+        TeamNameAliasSeed("Birmingham Phoenix", 45098),
+        TeamNameAliasSeed("London Spirit", 45099),
+        TeamNameAliasSeed("Manchester Originals", 45100),
+        TeamNameAliasSeed("Northern Superchargers", 45101),
+        TeamNameAliasSeed("Oval Invincibles", 45102),
+        TeamNameAliasSeed("Southern Brave", 45103),
+        TeamNameAliasSeed("Trent Rockets", 45104),
+        TeamNameAliasSeed("Welsh Fire", 45105),
+        TeamNameAliasSeed("MI London", 55090),
+        TeamNameAliasSeed("Sunrisers Leeds", 55091),
+        TeamNameAliasSeed("Manchester Super Giants", 55092),
+        TeamNameAliasSeed("Sharjah Warriorz", 50358),
+        TeamNameAliasSeed("Sunrisers Hyderabad", 22793),
+        TeamNameAliasSeed("Royal Challengers Bengaluru", 6927),
+        TeamNameAliasSeed("Kandy Customs Cricket Club", 28817),
+        TeamNameAliasSeed("Nugegoda Sports Welfare Club", 28516),
+        TeamNameAliasSeed("Central Stags", 66),
+        TeamNameAliasSeed("Otago Volts", 260),
+        TeamNameAliasSeed("Wellington Firebirds", 389),
+        TeamNameAliasSeed("Auckland Aces", 19),
+        TeamNameAliasSeed("Birmingham Bears", 387),
+        TeamNameAliasSeed("Africa XI", 1976),
+        TeamNameAliasSeed("Asia XI", 1782),
+        TeamNameAliasSeed("Rawalpindiz", 55249),
+        TeamNameAliasSeed("Himachal", 147),
+        TeamNameAliasSeed("Jammu & Kashmir", 159),
+        TeamNameAliasSeed("Hyderabad (India)", 780),
+        TeamNameAliasSeed("Odisha", 409),
+        TeamNameAliasSeed("ICC World XI", 1384),
+        TeamNameAliasSeed("Swaziland", 48403),
+        TeamNameAliasSeed("Zimbabwe", 31229),
+        TeamNameAliasSeed("Turks and Caicos Island", 2319),
+        TeamNameAliasSeed("South Africa Women", 25291),
+        TeamNameAliasSeed("South Africa", 25291),
+        TeamNameAliasSeed("South Africa", 10312),
+        TeamNameAliasSeed("Guyana Amazon", 55513), // women
+        TeamNameAliasSeed("Royal Challengers Bengaluru", 51559) // women
+    )
     private val tablesInDependencyOrder = listOf(
         "team_name_aliases", "dates", "teams", "people", "grounds", "matches", "match_source_reference",
         "innings", "wickets", "deliveries", "match_people", "delivery_wickets", "delivery_fielders"
@@ -38,7 +90,24 @@ internal object RelationalSchemaSql {
             writer.appendLine(it.trimIndent())
             writer.appendLine()
         }
+        teamNameAliasSeeds.forEach { seed ->
+            writer.appendLine(teamNameAliasInsert(seed, dialect))
+        }
     }
+
+    private fun teamNameAliasInsert(seed: TeamNameAliasSeed, dialect: SqlDialect): String {
+        val insert = when (dialect) {
+            SqlDialect.MARIADB -> "INSERT IGNORE INTO"
+            SqlDialect.POSTGRES -> "INSERT INTO"
+            SqlDialect.SQLITE -> "INSERT OR IGNORE INTO"
+        }
+        val escapedName = seed.sourceTeamName.replace("'", "''")
+        val onConflict = if (dialect == SqlDialect.POSTGRES) " ON CONFLICT DO NOTHING" else ""
+        return "$insert team_name_aliases (source_system, source_team_name, stats_team_id) " +
+            "VALUES ('${AliasSourceSystem.CRICSHEET.value}', '$escapedName', ${seed.statsTeamId})$onConflict;"
+    }
+
+    private data class TeamNameAliasSeed(val sourceTeamName: String, val statsTeamId: Int)
 
     private fun createStatements(dialect: SqlDialect): List<String> {
         val key = keyType(dialect)
