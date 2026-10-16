@@ -99,10 +99,38 @@ class ApplicationTest {
         return baseDirectory
     }
 
-    private fun sampleEnvelope(): CanonicalMatchEnvelope {
+    @Test
+    fun `given match files with duplicate sourceCaIds when application executes then import succeeds and second match is skipped`(
+        @TempDir temporaryDirectory: Path
+    ) {
+        val baseDirectory = prepareInput(temporaryDirectory)
+        val outputFile = baseDirectory.resolve("generated.sql")
+        val match1 = sampleEnvelope(
+            canonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b0")),
+            sourceCaId = "a434804"
+        )
+        val match2 = sampleEnvelope(
+            canonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b1")),
+            sourceCaId = "a434804"
+        )
+        Files.writeString(baseDirectory.resolve("matches/match1.json"), Json.encodeToString(match1))
+        Files.writeString(baseDirectory.resolve("matches/match2.json"), Json.encodeToString(match2))
+
+        val exitCode = Application.execute(arguments(baseDirectory, "mariadb"))
+
+        expectThat(exitCode).isEqualTo(0)
+        val sql = Files.readString(outputFile)
+        expectThat(sql).contains("'1890a7a8-f76d-5f36-89f7-39b0319044b0'")
+        expectThat(sql).not().contains("'1890a7a8-f76d-5f36-89f7-39b0319044b1'")
+    }
+
+    private fun sampleEnvelope(
+        canonicalMatchId: CanonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b0")),
+        sourceCaId: String? = null
+    ): CanonicalMatchEnvelope {
         val sourceRecordId = SourceRecordId.from(UUID.fromString("c61f62bd-7b02-5c3f-ae44-572d533b5877"))
         return CanonicalMatchEnvelope(
-            canonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b0")),
+            canonicalMatchId = canonicalMatchId,
             sources = listOf(
                 SourceReference(
                     provider = ProviderId.from("cricsheet"),
@@ -123,6 +151,7 @@ class ApplicationTest {
                     players = JsonObject(emptyMap()),
                     registry = PlayersRegistry(emptyMap()),
                     season = "2024",
+                    sourceCaId = sourceCaId,
                     teamType = "international",
                     teams = listOf("Team A", "Team B"),
                     toss = Toss(decision = "bat", winner = "Team A")

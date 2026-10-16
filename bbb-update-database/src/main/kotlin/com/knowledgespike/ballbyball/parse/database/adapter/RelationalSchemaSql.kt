@@ -18,7 +18,7 @@ internal object RelationalSchemaSql {
         TeamNameAliasSeed("Lions", 125),
         TeamNameAliasSeed("Knights", 110),
         TeamNameAliasSeed("Dolphins", 46696),
-        TeamNameAliasSeed("Warriors (FairBreak)", 49084),
+        TeamNameAliasSeed("Warriors (FairBreak) Women", 49084),
         TeamNameAliasSeed("Birmingham Phoenix", 45098),
         TeamNameAliasSeed("London Spirit", 45099),
         TeamNameAliasSeed("Manchester Originals", 45100),
@@ -54,8 +54,8 @@ internal object RelationalSchemaSql {
         TeamNameAliasSeed("South Africa Women", 25291),
         TeamNameAliasSeed("South Africa", 25291),
         TeamNameAliasSeed("South Africa", 10312),
-        TeamNameAliasSeed("Guyana Amazon", 55513), // women
-        TeamNameAliasSeed("Royal Challengers Bengaluru", 51559) // women
+        TeamNameAliasSeed("Guyana Amazon Warriors Women", 55513),
+        TeamNameAliasSeed("Royal Challengers Bengaluru Women", 51559)
     )
     private val tablesInDependencyOrder = listOf(
         "team_name_aliases", "dates", "teams", "people", "grounds", "matches", "match_source_reference",

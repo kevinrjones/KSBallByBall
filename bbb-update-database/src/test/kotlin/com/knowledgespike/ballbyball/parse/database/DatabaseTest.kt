@@ -137,23 +137,94 @@ class DatabaseTest {
     }
 
     private fun Database.writeMatch(fileName: String, cricSheet: BbbMatchData) {
+        writeMatch(fileName, sampleEnvelope(cricSheet = cricSheet))
+    }
+
+    private fun sampleEnvelope(
+        canonicalMatchId: CanonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b0")),
+        sourceCaId: String? = null,
+        cricSheet: BbbMatchData = cricSheetWithFielder()
+    ): CanonicalMatchEnvelope {
         val sourceRecordId = SourceRecordId.from(UUID.fromString("c61f62bd-7b02-5c3f-ae44-572d533b5877"))
-        writeMatch(
-            fileName,
-            CanonicalMatchEnvelope(
-                canonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b0")),
-                sources = listOf(
-                    SourceReference(
-                        provider = ProviderId.from("cricsheet"),
-                        providerRecordKey = "12345",
-                        sourceRecordId = sourceRecordId,
-                        rawContentDigest = Sha256Digest.from("0".repeat(64))
-                    )
-                ),
-                mergeEvidence = MergeEvidence.SingleSource(sourceRecordId),
-                match = cricSheet
-            )
+        return CanonicalMatchEnvelope(
+            canonicalMatchId = canonicalMatchId,
+            sources = listOf(
+                SourceReference(
+                    provider = ProviderId.from("cricsheet"),
+                    providerRecordKey = "12345",
+                    sourceRecordId = sourceRecordId,
+                    rawContentDigest = Sha256Digest.from("0".repeat(64))
+                )
+            ),
+            mergeEvidence = MergeEvidence.SingleSource(sourceRecordId),
+            match = if (sourceCaId != null) cricSheet.copy(match = cricSheet.match.copy(sourceCaId = sourceCaId)) else cricSheet
         )
+    }
+
+    @Test
+    fun `given a match with duplicate sourceCaId already assigned when writing then match is skipped and not inserted`() {
+        val output = Files.createTempFile("warehouse-duplicate-source-ca", ".sql")
+        val firstEnvelope = sampleEnvelope(
+            canonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b0")),
+            sourceCaId = "a434804"
+        )
+        val secondEnvelope = sampleEnvelope(
+            canonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b1")),
+            sourceCaId = "a434804"
+        )
+
+        SqlScriptOutputAdapter(output).use { adapter ->
+            val database = Database(adapter)
+            database.writeMatch("first.json", firstEnvelope)
+            database.writeMatch("second.json", secondEnvelope)
+            adapter.complete()
+        }
+
+        val sql = Files.readString(output)
+        expectThat(sql).contains("'1890a7a8-f76d-5f36-89f7-39b0319044b0'")
+        expectThat(sql).not().contains("'1890a7a8-f76d-5f36-89f7-39b0319044b1'")
+    }
+
+    @Test
+    fun `given duplicate sourceCaId in database output when writing then duplicate match is not inserted`() {
+        DriverManager.getConnection("jdbc:sqlite::memory:").use { connection ->
+            val script = java.io.StringWriter()
+            java.io.BufferedWriter(script).use { writer ->
+                com.knowledgespike.ballbyball.parse.database.adapter.RelationalSchemaSql.writeTo(
+                    writer,
+                    com.knowledgespike.ballbyball.parse.database.adapter.SqlDialect.SQLITE
+                )
+            }
+            script.toString().split(';').map(String::trim).filter(String::isNotEmpty).forEach { sql ->
+                connection.createStatement().use { it.execute(sql) }
+            }
+
+            val firstEnvelope = sampleEnvelope(
+                canonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b0")),
+                sourceCaId = "a434804"
+            )
+            val secondEnvelope = sampleEnvelope(
+                canonicalMatchId = CanonicalMatchId.from(UUID.fromString("1890a7a8-f76d-5f36-89f7-39b0319044b1")),
+                sourceCaId = "a434804"
+            )
+
+            SqlOutputAdapter(connection).use { adapter ->
+                val database = Database(adapter)
+                database.writeMatch("first.json", firstEnvelope)
+                database.writeMatch("second.json", secondEnvelope)
+            }
+
+            connection.createStatement().use { statement ->
+                statement.executeQuery("select count(*) from matches").use { result ->
+                    result.next()
+                    expectThat(result.getInt(1)).isEqualTo(1)
+                }
+                statement.executeQuery("select canonical_match_id from matches").use { result ->
+                    result.next()
+                    expectThat(result.getString(1)).isEqualTo("1890a7a8-f76d-5f36-89f7-39b0319044b0")
+                }
+            }
+        }
     }
     @Test
     fun `given an existing database match when written again then no dependent rows are inserted`() {

@@ -27,52 +27,73 @@ class Database(private val outputAdapter: OutputAdapter) {
 
 
     fun writeMatch(fileName: String, envelope: CanonicalMatchEnvelope) {
-        withMatchTransaction {
-            log.debug("Parsing match: {}", fileName)
-            val publicMatchId = DeterministicIdentity.publicMatchId(envelope.canonicalMatchId)
-            val sourceCaId = envelope.match.match.sourceCaId?.let(SourceCaId::from)
-            outputAdapter.reconcileSourceCaId(envelope.canonicalMatchId, sourceCaId)
-            if (!shouldParse(envelope.canonicalMatchId)) {
-                outputAdapter.ensurePublicMatchId(envelope.canonicalMatchId, publicMatchId)
-                check(!outputAdapter.sourceReferencesChanged(envelope.canonicalMatchId, envelope.sources)) {
-                    "Source content changed for canonical match ${envelope.canonicalMatchId.value}; rebuild the relational database before importing corrections"
+        try {
+            withMatchTransaction {
+                log.debug("Parsing match: {}", fileName)
+                val publicMatchId = DeterministicIdentity.publicMatchId(envelope.canonicalMatchId)
+                val sourceCaId = envelope.match.match.sourceCaId?.let(SourceCaId::from)
+                outputAdapter.reconcileSourceCaId(envelope.canonicalMatchId, sourceCaId)
+                if (!shouldParse(envelope.canonicalMatchId)) {
+                    outputAdapter.ensurePublicMatchId(envelope.canonicalMatchId, publicMatchId)
+                    check(!outputAdapter.sourceReferencesChanged(envelope.canonicalMatchId, envelope.sources)) {
+                        "Source content changed for canonical match ${envelope.canonicalMatchId.value}; rebuild the relational database before importing corrections"
+                    }
+                    log.info("Match already exists: {}", envelope.canonicalMatchId.value)
+                    return@withMatchTransaction
                 }
-                log.info("Match already exists: {}", envelope.canonicalMatchId.value)
-                return@withMatchTransaction
+                val cricSheet = envelope.match
+
+                val teams = cricSheet.match.teams
+                    .map { teamNameForMatch(it, cricSheet) }
+                    .map(outputAdapter::upsertTeam)
+                Translate.getPeople(cricSheet).forEach { person ->
+                    outputAdapter.upsertPerson(person.id, person.name, 0)
+                }
+
+                val players = Translate.getPlayers(cricSheet.match.players, cricSheet)
+                val umpires = Translate.getOfficials(cricSheet.match.officials?.umpires, cricSheet)
+                val tvUmpires = Translate.getOfficials(cricSheet.match.officials?.tvUmpires, cricSheet)
+                val reserveUmpires = Translate.getOfficials(cricSheet.match.officials?.reserveUmpires, cricSheet)
+                val matchReferees = Translate.getOfficials(cricSheet.match.officials?.matchReferees, cricSheet)
+                val ground = outputAdapter.upsertGround(cricSheet.match.venue ?: "")
+                val match = addMatchToDatabase(
+                    fileName,
+                    envelope.canonicalMatchId,
+                    publicMatchId,
+                    sourceCaId,
+                    teams,
+                    ground,
+                    cricSheet
+                )
+                outputAdapter.insertSourceReferences(match.id, envelope.sources)
+
+                addMatchPeople(match, players.values.flatten(), "PLAYER")
+                addMatchPeople(match, umpires, "UMPIRE")
+                addMatchPeople(match, tvUmpires, "TV_UMPIRE")
+                addMatchPeople(match, reserveUmpires, "RESERVE_UMPIRE")
+                addMatchPeople(match, matchReferees, "MATCH_REFEREE")
+                addBallByBall(fileName, match, teams, cricSheet)
             }
-            val cricSheet = envelope.match
-
-            val teams = cricSheet.match.teams
-                .map { teamNameForMatch(it, cricSheet) }
-                .map(outputAdapter::upsertTeam)
-            Translate.getPeople(cricSheet).forEach { person ->
-                outputAdapter.upsertPerson(person.id, person.name, 0)
+        } catch (e: InvalidStateException) {
+            if (isDuplicateSourceCaIdException(e)) {
+                log.warn(
+                    "Skipping match '{}' (canonical match {}): {}",
+                    fileName,
+                    envelope.canonicalMatchId.value,
+                    e.message
+                )
+                return
             }
-
-            val players = Translate.getPlayers(cricSheet.match.players, cricSheet)
-            val umpires = Translate.getOfficials(cricSheet.match.officials?.umpires, cricSheet)
-            val tvUmpires = Translate.getOfficials(cricSheet.match.officials?.tvUmpires, cricSheet)
-            val reserveUmpires = Translate.getOfficials(cricSheet.match.officials?.reserveUmpires, cricSheet)
-            val matchReferees = Translate.getOfficials(cricSheet.match.officials?.matchReferees, cricSheet)
-            val ground = outputAdapter.upsertGround(cricSheet.match.venue ?: "")
-            val match = addMatchToDatabase(
-                fileName,
-                envelope.canonicalMatchId,
-                publicMatchId,
-                sourceCaId,
-                teams,
-                ground,
-                cricSheet
-            )
-            outputAdapter.insertSourceReferences(match.id, envelope.sources)
-
-            addMatchPeople(match, players.values.flatten(), "PLAYER")
-            addMatchPeople(match, umpires, "UMPIRE")
-            addMatchPeople(match, tvUmpires, "TV_UMPIRE")
-            addMatchPeople(match, reserveUmpires, "RESERVE_UMPIRE")
-            addMatchPeople(match, matchReferees, "MATCH_REFEREE")
-            addBallByBall(fileName, match, teams, cricSheet)
+            throw e
         }
+    }
+
+    private fun isDuplicateSourceCaIdException(e: InvalidStateException): Boolean {
+        val message = e.message ?: return false
+        return message.startsWith("sourceCaId ") && (
+            message.contains("is already assigned") ||
+            message.contains("is assigned to")
+        )
     }
 
     private fun addBallByBall(

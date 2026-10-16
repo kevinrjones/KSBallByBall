@@ -37,17 +37,123 @@ class StatsMatchLinker(
         val criteria = MatchLookupCriteria.from(match)
         log.debug("Looking up stats match for {}", criteria)
         return try {
-            val exactDateResult = lookupWithMarginFallback(criteria)
-            val result = if (exactDateResult is StatsLinkResult.NotFound) {
-                lookupWithDateHeuristics(criteria, exactDateResult)
-            } else {
-                exactDateResult
+            val result = when (val repository = statsRepository) {
+                is BulkStatsMatchRepository -> lookupInBatch(criteria, repository)
+                else -> {
+                    val exactDateResult = lookupWithMarginFallback(criteria)
+                    if (exactDateResult is StatsLinkResult.NotFound) {
+                        lookupWithDateHeuristics(criteria, exactDateResult)
+                    } else {
+                        exactDateResult
+                    }
+                }
             }
             logResult(criteria, result, input)
             result
         } catch (exception: Exception) {
             lookupFailureLog.error("Stats match lookup failed for {}", criteria, exception)
             throw exception
+        }
+    }
+
+    private fun lookupInBatch(
+        criteria: MatchLookupCriteria,
+        repository: BulkStatsMatchRepository
+    ): StatsLinkResult {
+        val dates = listOf(criteria.matchDate) + StatsMatchDateHeuristic.candidateDates(criteria.matchDate)
+        val exactCandidate = lookupPolicy.exactCandidate(criteria.statsFirstTeam, criteria.statsSecondTeam)
+        val exactMatches = repository.candidateMatches(dates, listOf(exactCandidate))
+        val exactPrimaryResult = batchLookup(criteria, exactMatches, 0, criteria.matchDate, criteria.margin)
+        if (exactPrimaryResult !is StatsLinkResult.NotFound) return exactPrimaryResult
+
+        val firstAliases = aliasResolver?.aliasesFor(criteria.sourceFirstTeam).orEmpty().distinct()
+        invalidAlias(criteria.sourceFirstTeam, firstAliases)?.let { return it }
+        val secondAliases = aliasResolver?.aliasesFor(criteria.sourceSecondTeam).orEmpty().distinct()
+        invalidAlias(criteria.sourceSecondTeam, secondAliases)?.let { return it }
+        val aliasCandidate = lookupPolicy.aliasCandidate(
+            criteria.statsFirstTeam,
+            criteria.statsSecondTeam,
+            firstAliases,
+            secondAliases
+        )
+        val aliasMatches = aliasCandidate?.let { repository.candidateMatches(dates, listOf(it)) }.orEmpty()
+
+        dates.forEachIndexed { dateIndex, date ->
+            val dateCriteria = criteria.copy(matchDate = date)
+            if (criteria.margin != null) {
+                returnIfFound(
+                    criteria,
+                    date,
+                    batchLookup(dateCriteria, exactMatches, 0, date, criteria.margin)
+                )?.let { return it }
+
+                val aliasMarginResult = aliasCandidate?.let {
+                    batchLookup(dateCriteria, aliasMatches, 0, date, criteria.margin)
+                } ?: StatsLinkResult.NotFound(dateCriteria)
+                returnIfFound(criteria, date, aliasMarginResult)?.let { return it }
+
+                lookupFailureLog.warn(
+                    "Stats match lookup with margin failed for {}; retrying without margin",
+                    dateCriteria
+                )
+                returnIfFound(criteria, date, batchLookup(dateCriteria, exactMatches, 0, date, null))
+                    ?.let { return it }
+
+                val aliasPlainResult = aliasCandidate?.let {
+                    batchLookup(dateCriteria, aliasMatches, 0, date, null)
+                } ?: StatsLinkResult.NotFound(dateCriteria)
+                returnIfFound(criteria, date, aliasPlainResult)?.let { return it }
+            } else {
+                returnIfFound(criteria, date, batchLookup(dateCriteria, exactMatches, 0, date, null))
+                    ?.let { return it }
+
+                val aliasResult = aliasCandidate?.let {
+                    batchLookup(dateCriteria, aliasMatches, 0, date, null)
+                } ?: StatsLinkResult.NotFound(dateCriteria)
+                returnIfFound(criteria, date, aliasResult)?.let { return it }
+            }
+
+            if (dateIndex == 0 && dates.size > 1) {
+                lookupFailureLog.warn("Exact-date stats match lookup failed for {}; trying adjacent dates", criteria)
+            }
+        }
+        return StatsLinkResult.NotFound(criteria)
+    }
+
+    private fun returnIfFound(
+        criteria: MatchLookupCriteria,
+        date: LocalDate,
+        result: StatsLinkResult
+    ): StatsLinkResult? = when (result) {
+        is StatsLinkResult.NotFound -> null
+        is StatsLinkResult.Linked -> {
+            if (date != criteria.matchDate) {
+                log.info("Stats match linked using date heuristic for {} on {}", criteria, date)
+            }
+            result
+        }
+        is StatsLinkResult.Ambiguous -> result
+        is StatsLinkResult.InvalidAlias -> result
+        StatsLinkResult.Skipped -> result
+    }
+
+    private fun batchLookup(
+        criteria: MatchLookupCriteria,
+        matches: List<StatsMatchCandidateMatch>,
+        candidateIndex: Int,
+        date: LocalDate,
+        margin: Int?
+    ): StatsLinkResult {
+        val caIds = matches.asSequence()
+            .filter { it.candidateIndex == candidateIndex && it.matchDate == date }
+            .filter { margin == null || it.howMuch == margin }
+            .map(StatsMatchCandidateMatch::caId)
+            .distinct()
+            .toList()
+        return when (caIds.size) {
+            0 -> StatsLinkResult.NotFound(criteria)
+            1 -> StatsLinkResult.Linked(caIds.single())
+            else -> StatsLinkResult.Ambiguous(criteria, caIds)
         }
     }
 

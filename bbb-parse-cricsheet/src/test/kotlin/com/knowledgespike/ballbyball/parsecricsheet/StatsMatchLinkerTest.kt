@@ -8,7 +8,9 @@ import strikt.api.expectThat
 import strikt.assertions.contains
 import strikt.assertions.containsExactly
 import strikt.assertions.isEqualTo
+import java.lang.reflect.Proxy
 import java.nio.file.Path
+import java.sql.Connection
 import java.sql.DriverManager
 import java.time.LocalDate
 
@@ -67,6 +69,73 @@ class StatsMatchLinkerTest {
 
             expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).sourceCaId(source.match))
                 .isEqualTo("ca-12345")
+        }
+    }
+
+    @Test
+    fun `given all stats lookup dates miss then the match table is queried once`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            var matchQueryCount = 0
+            val countedConnection = Proxy.newProxyInstance(
+                Connection::class.java.classLoader,
+                arrayOf(Connection::class.java)
+            ) { _, method, arguments ->
+                if (method.name == "prepareStatement" && arguments?.getOrNull(0)?.toString()?.contains("FROM Matches m") == true) {
+                    matchQueryCount++
+                }
+                method.invoke(statsConnection, *arguments.orEmpty())
+            } as Connection
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument()
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(countedConnection, aliasConnection).link(source.match, input))
+                .isEqualTo(StatsLinkResult.NotFound(MatchLookupCriteria.from(source.match)))
+            expectThat(matchQueryCount).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `given an exact match and a margin-matching alias then exact margin match is preferred`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertTeam(statsConnection, 3, 30, "Canonical A")
+            insertMatch(statsConnection, "ca-exact-margin", 1, 2, howMuch = 100)
+            insertMatch(statsConnection, "ca-alias-margin", 3, 2, howMuch = 100)
+            insertAlias(aliasConnection, "Team A", 30)
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument().replace(
+                    "\"outcome\": {\"result\": \"draw\"}",
+                    "\"outcome\": {\"winner\": \"Team A\", \"by\": {\"runs\": 100}}"
+                )
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).sourceCaId(source.match))
+                .isEqualTo("ca-exact-margin")
+        }
+    }
+
+    @Test
+    fun `given alias margin match and exact margin mismatch then alias margin match is preferred`() {
+        withDatabases { statsConnection, aliasConnection ->
+            insertTeam(statsConnection, 1, 10, "Team A")
+            insertTeam(statsConnection, 2, 20, "Team B")
+            insertTeam(statsConnection, 3, 30, "Canonical A")
+            insertMatch(statsConnection, "ca-exact-plain", 1, 2, howMuch = 105)
+            insertMatch(statsConnection, "ca-alias-margin", 3, 2, howMuch = 100)
+            insertAlias(aliasConnection, "Team A", 30)
+            val source = json.decodeFromString<com.knowledgespike.ballbyball.clishared.schema.BbbMatchData>(
+                sourceDocument().replace(
+                    "\"outcome\": {\"result\": \"draw\"}",
+                    "\"outcome\": {\"winner\": \"Team A\", \"by\": {\"runs\": 100}}"
+                )
+            )
+
+            expectThat(StatsMatchLinker.fromConnections(statsConnection, aliasConnection).sourceCaId(source.match))
+                .isEqualTo("ca-alias-margin")
         }
     }
 

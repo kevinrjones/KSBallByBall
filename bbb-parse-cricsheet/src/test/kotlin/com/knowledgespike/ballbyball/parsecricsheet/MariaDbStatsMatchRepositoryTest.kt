@@ -69,7 +69,8 @@ class MariaDbStatsMatchRepositoryTest {
                     HomeTeamId int not null,
                     AwayTeamId int not null,
                     MatchStartDate date,
-                    HowMuch int not null
+                    HowMuch int not null,
+                    MatchType varchar(20) not null default 'tt'
                 )
                 """.trimIndent()
             )

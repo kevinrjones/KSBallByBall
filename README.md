@@ -89,6 +89,13 @@ Stats linking tries the source date with margin when present and then without;
 if all exact-date attempts miss, it retries ±1 day then ±2 days (earlier before
 later at each distance), trying margin before plain on each date. Ambiguous and
 invalid-alias results stop the fallback.
+
+The linker batches the primary date and all four alternate dates into one
+exact-team lookup and, only when needed, one alias lookup; team IDs are
+preloaded and date/margin priority is applied in memory. The CricketArchive
+stats schema has no `Matches.MatchStartDate` index, so see the
+[application architecture notes](docs/architecture/applications.md) for the
+optional operator-managed composite index recommendation.
 Match-link failures show the source alias key and include the stats team name
 when policy changes it. Cricsheet input is decoded once into typed source DTOs
 and explicitly mapped into the shared match contract. A durable-commit failure

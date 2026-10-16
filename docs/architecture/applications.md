@@ -54,18 +54,31 @@ miss, aliases are resolved using raw Cricsheet source names and the
 provider-namespace UUID `f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b` as
 `team_name_aliases.source_system`. This alias key is distinct from
 `ProviderId` `"cricsheet"`, which identifies the provider in
-`match_source_reference`. Validated target IDs are combined with the
-stats-facing names into one set-based alias query, preserving home/away
-interchangeability. A margin-constrained `NotFound` is retried as a plain second
-attempt without `Matches.HowMuch`. If all exact-primary-date attempts return
+`match_source_reference`. Validated target IDs are resolved through the
+preloaded team index and combined with stats-name IDs into an alias candidate,
+preserving home/away interchangeability. A margin-constrained `NotFound` is
+then evaluated without the margin. If all exact-primary-date attempts return
 `NotFound`, the linker tries exact dates one day before, one day after, two days
 before, then two days after the primary Cricsheet date, trying the original
-margin before a plain lookup on each alternate date. The first `Linked`, `Ambiguous`, or `InvalidAlias` result
-stops the cascade; SQL continues to use exact `MatchStartDate` equality, and
-policy-skipped matches do not enter lookup. `sourceCaId` is optional
-CricketArchive enrichment in the otherwise source-neutral payload and remains
-null for skipped or unlinked matches. Final expected link failures fail that
-file but still write its normalized envelope with a null `sourceCaId`.
+margin before a plain lookup on each alternate date. The first `Linked`,
+`Ambiguous`, or `InvalidAlias` result stops the cascade; SQL matches exact
+`MatchStartDate` values in the batch rather than applying fuzzy date matching,
+and policy-skipped matches do not enter lookup.
+
+The JDBC stats repository loads `Teams` once when it is created and resolves
+team names and stats IDs to internal `Teams.Id` values in memory. It fetches
+candidate matches for the primary date and ordered ±1/±2 fallbacks in one
+set-based query for the exact teams, and at most one additional query for alias
+candidates; margin, date priority, and exact-before-alias ranking are applied
+in memory. Positive alias lookups are cached for the repository lifetime, but
+empty results are not cached so newly added aliases remain visible. The
+CricketArchive stats schema has no index on `Matches.MatchStartDate`; operators
+can consider adding `Matches(MatchStartDate, HomeTeamId, AwayTeamId)` to support
+the batched date/team lookup. This repository does not modify the external
+stats database schema. `sourceCaId` is optional CricketArchive enrichment in
+the otherwise source-neutral payload and remains null for skipped or unlinked
+matches. Final expected link failures fail that file but still write its
+normalized envelope with a null `sourceCaId`.
 
 `TeamNamePolicy` owns female stats-name shaping and reads
 `policies/female-competition-exceptions.txt` and
