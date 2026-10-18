@@ -76,7 +76,10 @@ data class By(
 )
 
 @Serializable
-data class PlayersRegistry(val people: Map<String, String>)
+data class PlayersRegistry(
+    val people: Map<String, String>,
+    val peopleCaId: Map<String, Int>? = null
+)
 
 @Serializable
 data class Toss(

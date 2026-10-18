@@ -51,7 +51,6 @@ internal object RelationalSchemaSql {
         TeamNameAliasSeed("Swaziland", 48403),
         TeamNameAliasSeed("Zimbabwe", 31229),
         TeamNameAliasSeed("Turks and Caicos Island", 2319),
-        TeamNameAliasSeed("South Africa Women", 25291),
         TeamNameAliasSeed("South Africa", 25291),
         TeamNameAliasSeed("South Africa", 10312),
         TeamNameAliasSeed("Guyana Amazon Warriors Women", 55513),

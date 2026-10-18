@@ -47,7 +47,7 @@ class Database(private val outputAdapter: OutputAdapter) {
                     .map { teamNameForMatch(it, cricSheet) }
                     .map(outputAdapter::upsertTeam)
                 Translate.getPeople(cricSheet).forEach { person ->
-                    outputAdapter.upsertPerson(person.id, person.name, 0)
+                    outputAdapter.upsertPerson(person.id, person.name, person.caId)
                 }
 
                 val players = Translate.getPlayers(cricSheet.match.players, cricSheet)

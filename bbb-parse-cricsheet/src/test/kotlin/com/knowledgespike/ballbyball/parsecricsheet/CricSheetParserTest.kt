@@ -75,6 +75,45 @@ class CricSheetParserTest {
     }
 
     @Test
+    fun `given a stats match link and player linker when parsed then player linker is invoked and writes peopleCaId`() {
+        val root = Files.createTempDirectory("parse-cricsheet-player-link")
+        val input = root.resolve("input")
+        val output = root.resolve("output")
+        Files.createDirectories(input)
+        Files.writeString(input.resolve("12345.json"), sourceDocument())
+
+        var linkedSourceCaId: SourceCaId? = null
+        var linkedPlayers: Map<String, String>? = null
+
+        val playerLinker = PlayerLinker { sourceCaId, matchPlayers ->
+            linkedSourceCaId = sourceCaId
+            linkedPlayers = matchPlayers
+            listOf(
+                PlayerMatchResult(
+                    sourcePersonId = "person-1",
+                    sourceName = "Batter One",
+                    statsPlayerId = StatsPlayerId.from(101)
+                )
+            )
+        }
+
+        val result = CricSheetParser(
+            matchLinker = MatchLinker { _, _ -> StatsLinkResult.Linked(SourceCaId.from("ca-12345")) },
+            playerLinker = playerLinker
+        ).parse(input, output)
+
+        val outputContent = Files.readString(output.resolve("12345.json"))
+        val envelope = json.decodeFromString<CanonicalMatchEnvelope>(outputContent)
+
+        expectThat(result.succeeded).isEqualTo(true)
+        expectThat(linkedSourceCaId?.value).isEqualTo("ca-12345")
+        expectThat(linkedPlayers?.containsKey("Batter One")).isEqualTo(true)
+        expectThat(linkedPlayers?.get("Batter One")).isEqualTo("person-1")
+        expectThat(envelope.match.match.registry.peopleCaId).isEqualTo(mapOf("Batter One" to 101))
+        expectThat(outputContent).contains("\"peopleCaId\":{\"Batter One\":101}")
+    }
+
+    @Test
     fun `given a stats lookup throws then normalized output is retained and success replaces it`() {
         val root = Files.createTempDirectory("parse-cricsheet-routing")
         val input = root.resolve("input")

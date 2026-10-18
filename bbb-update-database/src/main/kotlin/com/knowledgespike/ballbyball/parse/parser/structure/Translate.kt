@@ -19,11 +19,11 @@ object Translate {
      * @return A list of Person objects constructed from the registry data in the CricSheet.
      */
     fun getPeople(cricSheet: BbbMatchData): List<Person> {
-
+        val caIds = cricSheet.match.registry.peopleCaId.orEmpty()
         return cricSheet.match.registry.people.map { (name, id) ->
-            Person(id, name)
+            val caId = caIds[name] ?: caIds[id] ?: 0
+            Person(id, name, caId)
         }
-
     }
 
     /**

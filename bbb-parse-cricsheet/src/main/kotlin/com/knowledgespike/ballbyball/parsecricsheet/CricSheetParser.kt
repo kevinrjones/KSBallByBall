@@ -3,6 +3,7 @@ package com.knowledgespike.ballbyball.parsecricsheet
 import arrow.core.Either
 import com.knowledgespike.ballbyball.clishared.identity.SingleSourceCanonicalizer
 import com.knowledgespike.ballbyball.clishared.identity.SourceMatchEnvelope
+import com.knowledgespike.ballbyball.identity.SourceCaId
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import java.nio.file.AtomicMoveNotSupportedException
@@ -24,7 +25,8 @@ class CricSheetParser(
     private val sourceJson: Json = Json { ignoreUnknownKeys = true; isLenient = true },
     private val outputJson: Json = Json { encodeDefaults = false },
     private val converter: CricSheetConverter = CricSheetConverter(sourceJson),
-    private val matchLinker: MatchLinker
+    private val matchLinker: MatchLinker,
+    private val playerLinker: PlayerLinker? = null
 ) {
     private val log = LoggerFactory.getLogger(CricSheetParser::class.java)
 
@@ -94,7 +96,30 @@ class CricSheetParser(
 
             is Either.Right -> {
                 linkFailure = null
-                envelopeToWrite = linkResult.value
+                var envelope = linkResult.value
+                val sourceCaIdStr = envelope.match.match.sourceCaId
+                if (playerLinker != null && !sourceCaIdStr.isNullOrBlank()) {
+                    val sourceCaId = SourceCaId.of(sourceCaIdStr).getOrNull()
+                    if (sourceCaId != null) {
+                        try {
+                            val playerResults = playerLinker.linkPlayers(sourceCaId, envelope.match.match.registry.people)
+                            val peopleCaId = playerResults
+                                .filter { it.statsPlayerId != null }
+                                .associate { it.sourceName to it.statsPlayerId!!.value }
+                            if (peopleCaId.isNotEmpty()) {
+                                envelope = envelope.withPeopleCaId(peopleCaId)
+                            }
+                        } catch (exception: Exception) {
+                            log.warn(
+                                "Player linking encountered an issue for match {}: {}",
+                                sourceCaIdStr,
+                                exception.message,
+                                exception
+                            )
+                        }
+                    }
+                }
+                envelopeToWrite = envelope
             }
         }
 
@@ -146,6 +171,16 @@ class CricSheetParser(
 
     private fun SourceMatchEnvelope.withSourceCaId(sourceCaId: String?): SourceMatchEnvelope = copy(
         match = match.copy(match = match.match.copy(sourceCaId = sourceCaId))
+    )
+
+    private fun SourceMatchEnvelope.withPeopleCaId(peopleCaId: Map<String, Int>): SourceMatchEnvelope = copy(
+        match = match.copy(
+            match = match.match.copy(
+                registry = match.match.registry.copy(
+                    peopleCaId = peopleCaId
+                )
+            )
+        )
     )
 
 

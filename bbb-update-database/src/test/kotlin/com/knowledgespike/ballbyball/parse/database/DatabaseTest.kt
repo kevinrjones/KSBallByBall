@@ -62,6 +62,23 @@ class DatabaseTest {
     }
 
     @Test
+    fun `given a match with peopleCaId in registry when written then people are inserted with caId`() {
+        val base = cricSheetWithFielder()
+        val matchWithCaId = base.copy(
+            match = base.match.copy(
+                registry = base.match.registry.copy(
+                    peopleCaId = mapOf("Batter" to 101, "Bowler" to 102)
+                )
+            )
+        )
+        val sql = writeMatchAndReadSql(matchWithCaId)
+
+        expectThat(sql).contains("INSERT INTO people (id, source_person_id, full_name, sort_name_part, other_name_part, ca_id)")
+        expectThat(sql).contains("'batter-id', 'Batter', 'Batter', '', 101")
+        expectThat(sql).contains("'bowler-id', 'Bowler', 'Bowler', '', 102")
+    }
+
+    @Test
     fun `given a failed match write when writing then the adapter rolls back`() {
         val adapter = FailingMatchOutputAdapter()
 

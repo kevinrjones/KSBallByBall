@@ -30,6 +30,26 @@ class BbbMatchDataTest {
         expectThat(decoded).isEqualTo(original)
     }
 
+    @Test
+    fun `shared schema serializes peopleCaId in registry and round trips`() {
+        val original = sampleMatchData().let { data ->
+            data.copy(
+                match = data.match.copy(
+                    registry = PlayersRegistry(
+                        people = mapOf("Batter One" to "person-1"),
+                        peopleCaId = mapOf("Batter One" to 101)
+                    )
+                )
+            )
+        }
+
+        val serialized = json.encodeToString(original)
+        val decoded = json.decodeFromString<BbbMatchData>(serialized)
+
+        expectThat(serialized).contains("\"peopleCaId\":{\"Batter One\":101}")
+        expectThat(decoded).isEqualTo(original)
+    }
+
     private fun sampleMatchData() = BbbMatchData(
         match = Info(
             ballsPerOver = 6,

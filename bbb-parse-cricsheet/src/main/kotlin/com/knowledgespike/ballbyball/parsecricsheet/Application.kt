@@ -19,7 +19,12 @@ object Application {
         )
     }
     private val productionParserFactory = ApplicationParserFactory { statsConnection, bbbConnection ->
-        val parser = CricSheetParser(matchLinker = StatsMatchLinker.fromConnections(statsConnection, bbbConnection))
+        val matchLinker = StatsMatchLinker.fromConnections(statsConnection, bbbConnection)
+        val playerLinker = StatsPlayerLinker.fromConnections(statsConnection, bbbConnection)
+        val parser = CricSheetParser(
+            matchLinker = matchLinker,
+            playerLinker = playerLinker
+        )
         ApplicationParser { input ->
             parser.parse(input)
         }
@@ -57,7 +62,7 @@ object Application {
                     input.bbbConnectionString,
                     input.bbbUserName,
                     environmentPassword(input.bbbPasswordEnvironmentVariable),
-                    readOnly = true
+                    readOnly = false
                 ).use { bbb ->
                     parserFactory.create(stats.connection, bbb.connection).parse(input)
                 }

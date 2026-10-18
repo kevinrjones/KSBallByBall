@@ -99,7 +99,10 @@ class CricSheetConverter(
         overs = info.overs,
         playerOfMatch = info.playerOfMatch,
         players = info.players,
-        registry = BbbPlayersRegistry(people = info.registry.people),
+        registry = BbbPlayersRegistry(
+            people = info.registry.people,
+            peopleCaId = info.registry.peopleCaId
+        ),
         season = info.season,
         superSubs = info.superSubs,
         teamType = info.teamType,

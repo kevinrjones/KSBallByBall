@@ -21,6 +21,9 @@ sealed class IdentityError(val message: String) {
 
     class InvalidSourceCaId(value: String?) :
         IdentityError("Source CA ID must contain 1 to ${SourceCaId.MAX_LENGTH} non-whitespace characters: '$value'")
+
+    class InvalidSourcePersonId(value: String?) :
+        IdentityError("Source person ID must contain 1 to ${SourcePersonId.MAX_LENGTH} characters: '$value'")
 }
 
 @Serializable
@@ -109,6 +112,29 @@ value class SourceCaId private constructor(val value: String) {
         }
 
         const val MAX_LENGTH = 20
+    }
+}
+
+@Serializable
+@JvmInline
+value class SourcePersonId private constructor(val value: String) {
+    companion object {
+        context(raise: Raise<IdentityError.InvalidSourcePersonId>)
+        operator fun invoke(value: String?): SourcePersonId {
+            val trimmed = value?.trim().orEmpty()
+            if (trimmed.isEmpty() || trimmed.length > MAX_LENGTH) {
+                raise.raise(IdentityError.InvalidSourcePersonId(value))
+            }
+            return SourcePersonId(trimmed)
+        }
+
+        fun of(value: String?): Either<IdentityError.InvalidSourcePersonId, SourcePersonId> = either { invoke(value) }
+
+        fun from(value: String): SourcePersonId = requireNotNull(of(value).getOrNull()) {
+            "Source person ID must contain 1 to $MAX_LENGTH characters"
+        }
+
+        const val MAX_LENGTH = 50
     }
 }
 

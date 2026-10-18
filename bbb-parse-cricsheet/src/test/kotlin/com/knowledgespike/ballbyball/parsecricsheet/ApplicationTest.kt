@@ -18,7 +18,7 @@ class ApplicationTest {
     lateinit var baseDirectory: Path
 
     @Test
-    fun `given valid settings when application runs then both connections are read only and closed`() {
+    fun `given valid settings when application runs then stats connection is read only, bbb connection is writable, and both are closed`() {
         val openedConnections = mutableListOf<OpenedConnection>()
         val connectionFactory = ApplicationConnectionFactory { connectionString, userName, password, readOnly ->
             val opened = OpenedConnection(
@@ -43,7 +43,7 @@ class ApplicationTest {
 
         expectThat(exitCode).isEqualTo(0)
         expectThat(openedConnections.map { it.connectionString }).isEqualTo(listOf("jdbc:stats", "jdbc:bbb"))
-        expectThat(openedConnections.map { it.readOnly }).isEqualTo(listOf(true, true))
+        expectThat(openedConnections.map { it.readOnly }).isEqualTo(listOf(true, false))
         assertSame(openedConnections[0].handle.connection, linkedStatsConnection)
         assertSame(openedConnections[1].handle.connection, linkedBbbConnection)
         assertTrue(openedConnections.all { it.handle.closed })
