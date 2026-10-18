@@ -1,6 +1,7 @@
 package com.knowledgespike.ballbyball.parse.database.adapter.relational
 
 import com.knowledgespike.ballbyball.clishared.identity.SourceReference
+import com.knowledgespike.ballbyball.clishared.identity.getNameParts
 import com.knowledgespike.ballbyball.identity.CanonicalMatchId
 import com.knowledgespike.ballbyball.identity.SourceCaId
 import com.knowledgespike.ballbyball.parse.database.Ground
@@ -19,7 +20,6 @@ import com.knowledgespike.ballbyball.parse.database.adapter.MatchWriteDecision
 import com.knowledgespike.ballbyball.parse.database.adapter.MatchTransactionParticipant
 import com.knowledgespike.ballbyball.parse.database.adapter.RelationalWriteSupport
 import com.knowledgespike.ballbyball.parse.database.adapter.SourceCaIdAssignment
-import com.knowledgespike.ballbyball.parse.database.adapter.getNameParts
 import com.knowledgespike.ballbyball.types.values.PublicMatchId
 import com.knowledgespike.cricketarchive.LoggerDelegate
 import java.time.LocalDate

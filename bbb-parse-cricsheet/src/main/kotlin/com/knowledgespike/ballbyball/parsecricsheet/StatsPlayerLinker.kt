@@ -1,6 +1,7 @@
 package com.knowledgespike.ballbyball.parsecricsheet
 
 import com.knowledgespike.ballbyball.identity.SourceCaId
+import com.knowledgespike.ballbyball.identity.SourcePersonId
 import org.slf4j.LoggerFactory
 import java.sql.Connection
 
@@ -36,34 +37,30 @@ class StatsPlayerLinker(
     ): List<PlayerMatchResult> {
         if (matchPlayers.isEmpty()) return emptyList()
 
-        val results = mutableListOf<PlayerMatchResult>()
-        val uncachedPlayers = mutableMapOf<String, String>()
-
-        // 1. Check in-memory cache
-        for ((name, sourcePersonId) in matchPlayers) {
-            val cachedId = playerCache[sourcePersonId]
-            if (cachedId != null) {
-                log.debug("Player '{}' ({}) resolved from cache -> ca_id: {}", name, sourcePersonId, cachedId.value)
-                results.add(PlayerMatchResult(sourcePersonId, name, cachedId))
-            } else {
-                uncachedPlayers[name] = sourcePersonId
-            }
+        val parsedPlayers: List<Pair<String, SourcePersonId>> = matchPlayers.mapNotNull { (name, rawId) ->
+            SourcePersonId.of(rawId).getOrNull()?.let { personId -> name to personId }
         }
 
-        // 2. If all players are already cached, bypass stats database query completely
-        if (uncachedPlayers.isEmpty()) {
+        val (cached, uncached) = parsedPlayers.partition { (_, personId) -> playerCache[personId] != null }
+
+        val cachedResults = cached.map { (name, personId) ->
+            val cachedId = playerCache[personId]!!
+            log.debug("Player '{}' ({}) resolved from cache -> ca_id: {}", name, personId.value, cachedId.value)
+            PlayerMatchResult(personId, name, cachedId)
+        }
+
+        if (uncached.isEmpty()) {
             log.debug("All {} players in match {} were resolved from cache", matchPlayers.size, sourceCaId.value)
-            return results
+            return cachedResults
         }
 
         log.info(
             "Querying roster for match {} to resolve {} uncached players ({} already cached)",
             sourceCaId.value,
-            uncachedPlayers.size,
-            results.size
+            uncached.size,
+            cachedResults.size
         )
 
-        // 3. Query match roster from stats repository
         val roster = try {
             statsPlayerRepository.playersForMatch(sourceCaId)
         } catch (e: Exception) {
@@ -73,50 +70,45 @@ class StatsPlayerLinker(
 
         if (roster.isEmpty()) {
             log.warn("No roster players found in stats database for match {}", sourceCaId.value)
-            for ((name, sourcePersonId) in uncachedPlayers) {
-                results.add(PlayerMatchResult(sourcePersonId, name, null))
-            }
-            return results
+            return cachedResults + uncached.map { (name, personId) -> PlayerMatchResult(personId, name, null) }
         }
 
-        // 4. Match uncached players against roster
-        for ((name, sourcePersonId) in uncachedPlayers) {
+        val uncachedResults = uncached.map { (name, personId) ->
             val matched = PlayerNameMatcher.matchPlayer(name, roster)
             if (matched != null) {
                 log.info(
                     "Matched player '{}' ({}) to stats player '{}' (ca_id: {})",
                     name,
-                    sourcePersonId,
+                    personId.value,
                     matched.fullName,
                     matched.playerId.value
                 )
-                // Write-through to cache and database
-                playerCache[sourcePersonId] = matched.playerId
                 try {
-                    playerIdentityRepository.savePlayerMapping(sourcePersonId, name, matched.playerId)
+                    playerIdentityRepository.savePlayerMapping(personId, name, matched.playerId)
+                    playerCache[personId] = matched.playerId
                 } catch (e: Exception) {
                     log.error(
                         "Failed to persist player mapping for '{}' ({}) -> ca_id {}: {}",
                         name,
-                        sourcePersonId,
+                        personId.value,
                         matched.playerId.value,
                         e.message,
                         e
                     )
                 }
-                results.add(PlayerMatchResult(sourcePersonId, name, matched.playerId))
+                PlayerMatchResult(personId, name, matched.playerId)
             } else {
                 log.warn(
                     "Unmatched player '{}' ({}) in match {}",
                     name,
-                    sourcePersonId,
+                    personId.value,
                     sourceCaId.value
                 )
-                results.add(PlayerMatchResult(sourcePersonId, name, null))
+                PlayerMatchResult(personId, name, null)
             }
         }
 
-        return results
+        return cachedResults + uncachedResults
     }
 
     companion object {

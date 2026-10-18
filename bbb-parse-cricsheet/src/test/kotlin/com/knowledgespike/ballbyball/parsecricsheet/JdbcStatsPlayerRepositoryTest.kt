@@ -1,6 +1,7 @@
 package com.knowledgespike.ballbyball.parsecricsheet
 
 import com.knowledgespike.ballbyball.identity.SourceCaId
+import com.knowledgespike.ballbyball.identity.SourcePersonId
 import org.junit.jupiter.api.Test
 import strikt.api.expectThat
 import strikt.assertions.hasSize
@@ -50,8 +51,8 @@ class JdbcStatsPlayerRepositoryTest {
             val mappings = repository.loadAllPlayerMappings()
 
             expectThat(mappings).hasSize(2)
-            expectThat(mappings["person_1"]?.value).isEqualTo(101)
-            expectThat(mappings["person_2"]?.value).isEqualTo(102)
+            expectThat(mappings[SourcePersonId.from("person_1")]?.value).isEqualTo(101)
+            expectThat(mappings[SourcePersonId.from("person_2")]?.value).isEqualTo(102)
         }
     }
 
@@ -61,29 +62,31 @@ class JdbcStatsPlayerRepositoryTest {
             val repository = JdbcPlayerIdentityRepository(connection)
 
             // Update existing person with ca_id = 0
-            repository.savePlayerMapping("person_unmapped", "Steve Smith", StatsPlayerId.from(103))
+            repository.savePlayerMapping(SourcePersonId.from("person_unmapped"), "Steve Smith", StatsPlayerId.from(103))
             val updatedMappings = repository.loadAllPlayerMappings()
-            expectThat(updatedMappings["person_unmapped"]?.value).isEqualTo(103)
+            expectThat(updatedMappings[SourcePersonId.from("person_unmapped")]?.value).isEqualTo(103)
 
             // Insert new person not yet in table
-            repository.savePlayerMapping("person_new", "Jasprit Jasbirsingh Bumrah", StatsPlayerId.from(104))
+            repository.savePlayerMapping(SourcePersonId.from("person_new"), "Jasprit Jasbirsingh Bumrah", StatsPlayerId.from(104))
             val allMappings = repository.loadAllPlayerMappings()
-            expectThat(allMappings["person_new"]?.value).isEqualTo(104)
+            expectThat(allMappings[SourcePersonId.from("person_new")]?.value).isEqualTo(104)
         }
     }
 
     @Test
     fun `given thread safe player cache when initialized and updated then behaves correctly`() {
-        val initial = mapOf("p1" to StatsPlayerId.from(100))
+        val p1 = SourcePersonId.from("p1")
+        val p2 = SourcePersonId.from("p2")
+        val initial = mapOf(p1 to StatsPlayerId.from(100))
         val cache = ThreadSafePlayerCache(initial)
 
         expectThat(cache.size).isEqualTo(1)
-        expectThat(cache["p1"]?.value).isEqualTo(100)
-        expectThat(cache["p2"]).isNull()
+        expectThat(cache[p1]?.value).isEqualTo(100)
+        expectThat(cache[p2]).isNull()
 
-        cache["p2"] = StatsPlayerId.from(200)
+        cache[p2] = StatsPlayerId.from(200)
         expectThat(cache.size).isEqualTo(2)
-        expectThat(cache["p2"]?.value).isEqualTo(200)
+        expectThat(cache[p2]?.value).isEqualTo(200)
     }
 
     private fun withStatsDatabase(block: (Connection) -> Unit) {

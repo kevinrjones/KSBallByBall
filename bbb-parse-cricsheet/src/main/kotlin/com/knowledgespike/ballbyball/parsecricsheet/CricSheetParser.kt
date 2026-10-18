@@ -79,49 +79,20 @@ class CricSheetParser(
             return failureWithoutOutput(input, output, exception)
         }
 
-        val linkResult = try {
+        val (envelopeToWrite, linkFailure) = try {
             linkMatch(sourceEnvelope, input)
         } catch (exception: Exception) {
             log.error("Unable to link stats match for {}: {}", input, exception.message, exception)
             Either.Left(ParseFailure(input, exception.message ?: exception::class.simpleName.orEmpty()))
-        }
-        val linkFailure: ParseFailure?
-        val envelopeToWrite: SourceMatchEnvelope
-        when (linkResult) {
-            is Either.Left -> {
-                linkFailure = linkResult.value
-                log.error("Unable to link stats match for {}: {}", input, linkFailure.message)
-                envelopeToWrite = sourceEnvelope.withSourceCaId(null)
+        }.fold(
+            ifLeft = { failure ->
+                log.error("Unable to link stats match for {}: {}", input, failure.message)
+                sourceEnvelope.withSourceCaId(null) to failure
+            },
+            ifRight = { linkedEnvelope ->
+                enrichPlayers(linkedEnvelope) to null
             }
-
-            is Either.Right -> {
-                linkFailure = null
-                var envelope = linkResult.value
-                val sourceCaIdStr = envelope.match.match.sourceCaId
-                if (playerLinker != null && !sourceCaIdStr.isNullOrBlank()) {
-                    val sourceCaId = SourceCaId.of(sourceCaIdStr).getOrNull()
-                    if (sourceCaId != null) {
-                        try {
-                            val playerResults = playerLinker.linkPlayers(sourceCaId, envelope.match.match.registry.people)
-                            val peopleCaId = playerResults
-                                .filter { it.statsPlayerId != null }
-                                .associate { it.sourceName to it.statsPlayerId!!.value }
-                            if (peopleCaId.isNotEmpty()) {
-                                envelope = envelope.withPeopleCaId(peopleCaId)
-                            }
-                        } catch (exception: Exception) {
-                            log.warn(
-                                "Player linking encountered an issue for match {}: {}",
-                                sourceCaIdStr,
-                                exception.message,
-                                exception
-                            )
-                        }
-                    }
-                }
-                envelopeToWrite = envelope
-            }
-        }
+        )
 
         return try {
             val canonicalEnvelope = SingleSourceCanonicalizer.canonicalize(envelopeToWrite)
@@ -131,6 +102,29 @@ class CricSheetParser(
         } catch (exception: Exception) {
             val failure = failureWithoutOutput(input, output, exception)
             linkFailure?.let { failure.copy(message = "${it.message}; ${failure.message}") } ?: failure
+        }
+    }
+
+    private fun enrichPlayers(envelope: SourceMatchEnvelope): SourceMatchEnvelope {
+        val linker = playerLinker ?: return envelope
+        val sourceCaIdStr = envelope.match.match.sourceCaId ?: return envelope
+        val sourceCaId = SourceCaId.of(sourceCaIdStr).getOrNull() ?: return envelope
+
+        return try {
+            val playerResults = linker.linkPlayers(sourceCaId, envelope.match.match.registry.people)
+            val peopleCaId = playerResults
+                .filter { it.statsPlayerId != null }
+                .associate { it.sourcePersonId.value to it.statsPlayerId!!.value }
+
+            if (peopleCaId.isNotEmpty()) envelope.withPeopleCaId(peopleCaId) else envelope
+        } catch (exception: Exception) {
+            log.warn(
+                "Player linking encountered an issue for match {}: {}",
+                sourceCaIdStr,
+                exception.message,
+                exception
+            )
+            envelope
         }
     }
 

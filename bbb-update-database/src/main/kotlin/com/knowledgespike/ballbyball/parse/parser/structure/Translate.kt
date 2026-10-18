@@ -21,7 +21,7 @@ object Translate {
     fun getPeople(cricSheet: BbbMatchData): List<Person> {
         val caIds = cricSheet.match.registry.peopleCaId.orEmpty()
         return cricSheet.match.registry.people.map { (name, id) ->
-            val caId = caIds[name] ?: caIds[id] ?: 0
+            val caId = caIds[id] ?: 0
             Person(id, name, caId)
         }
     }

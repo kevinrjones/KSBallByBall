@@ -1,7 +1,8 @@
 package com.knowledgespike.ballbyball.parsecricsheet
 
+import com.knowledgespike.ballbyball.clishared.identity.getNameParts
+import com.knowledgespike.ballbyball.identity.SourcePersonId
 import java.sql.Connection
-import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -11,36 +12,36 @@ interface PlayerIdentityRepository {
     /**
      * Loads all existing player mappings from the database.
      */
-    fun loadAllPlayerMappings(): Map<String, StatsPlayerId>
+    fun loadAllPlayerMappings(): Map<SourcePersonId, StatsPlayerId>
 
     /**
      * Saves or updates a mapping between [sourcePersonId] and [statsPlayerId].
      */
-    fun savePlayerMapping(sourcePersonId: String, fullName: String, statsPlayerId: StatsPlayerId)
+    fun savePlayerMapping(sourcePersonId: SourcePersonId, fullName: String, statsPlayerId: StatsPlayerId)
 }
 
 /**
  * In-memory thread-safe cache for player ID mappings.
  */
 interface PlayerCache {
-    operator fun get(sourcePersonId: String): StatsPlayerId?
-    operator fun set(sourcePersonId: String, statsPlayerId: StatsPlayerId)
-    fun putAll(mappings: Map<String, StatsPlayerId>)
+    operator fun get(sourcePersonId: SourcePersonId): StatsPlayerId?
+    operator fun set(sourcePersonId: SourcePersonId, statsPlayerId: StatsPlayerId)
+    fun putAll(mappings: Map<SourcePersonId, StatsPlayerId>)
     val size: Int
 }
 
 class ThreadSafePlayerCache(
-    initialMappings: Map<String, StatsPlayerId> = emptyMap()
+    initialMappings: Map<SourcePersonId, StatsPlayerId> = emptyMap()
 ) : PlayerCache {
-    private val cache = ConcurrentHashMap<String, StatsPlayerId>(initialMappings)
+    private val cache = ConcurrentHashMap<SourcePersonId, StatsPlayerId>(initialMappings)
 
-    override operator fun get(sourcePersonId: String): StatsPlayerId? = cache[sourcePersonId]
+    override operator fun get(sourcePersonId: SourcePersonId): StatsPlayerId? = cache[sourcePersonId]
 
-    override operator fun set(sourcePersonId: String, statsPlayerId: StatsPlayerId) {
+    override operator fun set(sourcePersonId: SourcePersonId, statsPlayerId: StatsPlayerId) {
         cache[sourcePersonId] = statsPlayerId
     }
 
-    override fun putAll(mappings: Map<String, StatsPlayerId>) {
+    override fun putAll(mappings: Map<SourcePersonId, StatsPlayerId>) {
         cache.putAll(mappings)
     }
 
@@ -55,13 +56,14 @@ class JdbcPlayerIdentityRepository(
     private val connection: Connection
 ) : PlayerIdentityRepository {
 
-    override fun loadAllPlayerMappings(): Map<String, StatsPlayerId> {
-        val mappings = mutableMapOf<String, StatsPlayerId>()
+    override fun loadAllPlayerMappings(): Map<SourcePersonId, StatsPlayerId> {
+        val mappings = mutableMapOf<SourcePersonId, StatsPlayerId>()
         val sql = "SELECT source_person_id, ca_id FROM people WHERE ca_id > 0"
         connection.createStatement().use { statement ->
             statement.executeQuery(sql).use { rs ->
                 while (rs.next()) {
-                    val sourcePersonId = rs.getString(1)
+                    val rawPersonId = rs.getString(1)
+                    val sourcePersonId = rawPersonId?.let { SourcePersonId.of(it).getOrNull() }
                     val caId = rs.getInt(2)
                     if (sourcePersonId != null && caId > 0) {
                         mappings[sourcePersonId] = StatsPlayerId.from(caId)
@@ -73,14 +75,14 @@ class JdbcPlayerIdentityRepository(
     }
 
     override fun savePlayerMapping(
-        sourcePersonId: String,
+        sourcePersonId: SourcePersonId,
         fullName: String,
         statsPlayerId: StatsPlayerId
     ) {
         val updateSql = "UPDATE people SET ca_id = ? WHERE source_person_id = ?"
         val rowsUpdated = connection.prepareStatement(updateSql).use { statement ->
             statement.setInt(1, statsPlayerId.value)
-            statement.setString(2, sourcePersonId)
+            statement.setString(2, sourcePersonId.value)
             statement.executeUpdate()
         }
         if (rowsUpdated == 0) {
@@ -90,31 +92,13 @@ class JdbcPlayerIdentityRepository(
                 VALUES (?, ?, ?, ?, ?)
             """.trimIndent()
             connection.prepareStatement(insertSql).use { statement ->
-                statement.setString(1, sourcePersonId)
+                statement.setString(1, sourcePersonId.value)
                 statement.setString(2, fullName)
                 statement.setString(3, sortNamePart)
                 statement.setString(4, otherNamePart)
                 statement.setInt(5, statsPlayerId.value)
                 statement.executeUpdate()
             }
-        }
-    }
-
-    private fun getNameParts(personName: String): Pair<String, String> {
-        val fullName = if (personName.contains("(")) personName.substringBefore("(").trim() else personName
-        if (!fullName.contains(" ")) return fullName.replace("'", "") to ""
-        val parts = fullName.split(" ")
-        return when {
-            parts[0].uppercase(Locale.ROOT) == parts[0] -> {
-                parts.drop(1).joinToString("").replace("'", "") to parts[0].trim()
-            }
-            parts[0] == "Lord" -> {
-                parts.last().replace("'", "") to parts.drop(1).joinToString(" ")
-            }
-            parts[0] in setOf("Sir", "Earl", "Duke", "Nawab") && parts.size > 2 && parts[1] == "of" -> {
-                parts.drop(2).first().replace("'", "") to parts.dropLast(1).joinToString(" ")
-            }
-            else -> fullName.replace(" ", "").replace("'", "") to ""
         }
     }
 }

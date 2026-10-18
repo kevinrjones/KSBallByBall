@@ -3,6 +3,7 @@ package com.knowledgespike.ballbyball.parsecricsheet
 import arrow.core.Either
 import arrow.core.raise.Raise
 import arrow.core.raise.either
+import com.knowledgespike.ballbyball.identity.SourcePersonId
 import java.text.Normalizer
 import java.util.Locale
 
@@ -47,7 +48,7 @@ data class StatsRosterPlayer(
  * Result of linking a source Cricsheet player name/id to a stats player ID.
  */
 data class PlayerMatchResult(
-    val sourcePersonId: String,
+    val sourcePersonId: SourcePersonId,
     val sourceName: String,
     val statsPlayerId: StatsPlayerId?
 )

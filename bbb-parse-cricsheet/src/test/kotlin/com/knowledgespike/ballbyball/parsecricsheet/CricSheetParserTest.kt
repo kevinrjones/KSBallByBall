@@ -2,6 +2,7 @@ package com.knowledgespike.ballbyball.parsecricsheet
 
 import com.knowledgespike.ballbyball.clishared.identity.CanonicalMatchEnvelope
 import com.knowledgespike.ballbyball.identity.SourceCaId
+import com.knowledgespike.ballbyball.identity.SourcePersonId
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -90,7 +91,7 @@ class CricSheetParserTest {
             linkedPlayers = matchPlayers
             listOf(
                 PlayerMatchResult(
-                    sourcePersonId = "person-1",
+                    sourcePersonId = SourcePersonId.from("person-1"),
                     sourceName = "Batter One",
                     statsPlayerId = StatsPlayerId.from(101)
                 )
@@ -109,8 +110,8 @@ class CricSheetParserTest {
         expectThat(linkedSourceCaId?.value).isEqualTo("ca-12345")
         expectThat(linkedPlayers?.containsKey("Batter One")).isEqualTo(true)
         expectThat(linkedPlayers?.get("Batter One")).isEqualTo("person-1")
-        expectThat(envelope.match.match.registry.peopleCaId).isEqualTo(mapOf("Batter One" to 101))
-        expectThat(outputContent).contains("\"peopleCaId\":{\"Batter One\":101}")
+        expectThat(envelope.match.match.registry.peopleCaId).isEqualTo(mapOf("person-1" to 101))
+        expectThat(outputContent).contains("\"peopleCaId\":{\"person-1\":101}")
     }
 
     @Test

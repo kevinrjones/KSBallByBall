@@ -9,10 +9,10 @@ import com.knowledgespike.ballbyball.identity.SourceRecordId
 import com.knowledgespike.ballbyball.identity.SourceCaId
 import com.knowledgespike.ballbyball.clishared.identity.SourceReference
 
+import com.knowledgespike.ballbyball.clishared.identity.getNameParts
 import com.knowledgespike.ballbyball.parse.database.adapter.sqlite.SqlScriptOutputAdapter
 import com.knowledgespike.ballbyball.parse.database.adapter.sqlite.SqlOutputAdapter
 import com.knowledgespike.ballbyball.parse.database.adapter.csv.CsvOutputAdapter
-import com.knowledgespike.ballbyball.parse.database.adapter.getNameParts
 import com.knowledgespike.ballbyball.parse.database.adapter.DeliveryRecord
 import com.knowledgespike.ballbyball.parse.database.adapter.MatchRecord
 import com.knowledgespike.ballbyball.parse.database.adapter.OutputAdapter
@@ -67,7 +67,7 @@ class DatabaseTest {
         val matchWithCaId = base.copy(
             match = base.match.copy(
                 registry = base.match.registry.copy(
-                    peopleCaId = mapOf("Batter" to 101, "Bowler" to 102)
+                    peopleCaId = mapOf("batter-id" to 101, "bowler-id" to 102)
                 )
             )
         )
