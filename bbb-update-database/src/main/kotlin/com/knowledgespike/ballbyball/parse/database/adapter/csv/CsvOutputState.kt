@@ -1,51 +1,56 @@
 package com.knowledgespike.ballbyball.parse.database.adapter.csv
 
+import com.knowledgespike.ballbyball.parse.database.adapter.JournaledMatchReplace
+import com.knowledgespike.ballbyball.parse.database.adapter.JournaledReplaceKind
 import com.knowledgespike.ballbyball.parse.database.adapter.MatchTransactionParticipant
 import com.knowledgespike.ballbyball.parse.database.adapter.RelationalWriteSupport
 import com.knowledgespike.ballbyball.parse.database.adapter.relational.RelationalRow
 import com.knowledgespike.ballbyball.parse.database.adapter.relational.RelationalRowOperation
+import java.io.BufferedWriter
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 
 internal class CsvOutputState(
-    private val bundlePublisher: CsvBundlePublisher
+    private val stagedPath: Path,
+    private val outputPath: Path,
+    private val publishBundleOverride: ((Path, Path) -> Unit)? = null
 ) : MatchTransactionParticipant {
-    private val pendingRows = mutableMapOf<String, CsvPendingTable>()
+    private val tableWriters = mutableMapOf<String, TableWriterState>()
     private val matchRows = linkedMapOf<Long, List<Any?>>()
     private val inningsRows = linkedMapOf<Long, List<Any?>>()
-    private val updatedTables = mutableSetOf<String>()
     private var snapshot: Snapshot? = null
+    private var completed = false
 
     override fun begin() {
         check(snapshot == null) { "CSV output transaction is already active" }
+        val tableOffsets = tableWriters.mapValues { (_, writer) -> writer.currentSize() }
         snapshot = Snapshot(
-            pendingRows = pendingRows.mapValues { (_, table) -> table.snapshot() },
             matchRows = matchRows.toMap(),
             inningsRows = inningsRows.toMap(),
-            updatedTables = updatedTables.toSet()
+            tableOffsets = tableOffsets
         )
     }
 
     override fun durableCommit() {
-        val changedTables = pendingRows.keys.toMutableSet().apply { addAll(updatedTables) }
-        if (changedTables.isEmpty()) return
-
-        val publicationRows = pendingRows.mapValues { (_, table) -> table.publicationSnapshot() }.toMutableMap()
-        if ("innings" in changedTables) {
-            publicationRows["innings"] = CsvTableSnapshot(
-                headers = RelationalWriteSupport.INNINGS_COLUMNS,
-                rows = inningsRows.values.toList()
-            )
-        }
-        bundlePublisher.publish(changedTables, publicationRows, matchRows.toMap())
+        // Direct writes occur into staged files; atomic directory publish occurs on complete().
     }
 
     override fun commit() {
-        pendingRows.clear()
-        updatedTables.clear()
         snapshot = null
     }
 
     override fun rollback() {
-        snapshot?.let(::restore)
+        val snap = snapshot ?: return
+        matchRows.replaceWith(snap.matchRows)
+        inningsRows.replaceWith(snap.inningsRows)
+        tableWriters.forEach { (name, writer) ->
+            val prevSize = snap.tableOffsets[name] ?: 0L
+            if (writer.currentSize() > prevSize) {
+                writer.truncate(prevSize)
+            }
+        }
         snapshot = null
     }
 
@@ -54,11 +59,6 @@ internal class CsvOutputState(
             applyUpdate(row)
             return null
         }
-        val table = pendingRows.getOrPut(row.tableName) {
-            CsvPendingTable(row.columns.toList(), mutableListOf())
-        }
-        check(table.headers == row.columns) { "CSV headers changed for table ${row.tableName}" }
-        table.rows += row.values.toList()
         when (row.tableName) {
             "matches" -> {
                 val rowValues = row.columns.zip(row.values).toMap()
@@ -69,15 +69,67 @@ internal class CsvOutputState(
                 val rowValues = row.columns.zip(row.values).toMap()
                 inningsRows[rowValues.getValue("id") as Long] = row.values.toList()
             }
+
+            else -> {
+                val table = tableWriters.getOrPut(row.tableName) {
+                    TableWriterState(row.tableName, stagedPath.resolve("${row.tableName}.csv"))
+                }
+                table.ensureHeaders(row.columns)
+                table.writeRow(row.values)
+            }
         }
         return null
     }
 
-    private fun restore(snapshot: Snapshot) {
-        pendingRows.replaceWith(snapshot.pendingRows.mapValues { (_, table) -> table.snapshot() })
-        matchRows.replaceWith(snapshot.matchRows)
-        inningsRows.replaceWith(snapshot.inningsRows)
-        updatedTables.replaceWith(snapshot.updatedTables)
+    fun complete() {
+        check(!completed) { "CSV output is already completed" }
+        if (matchRows.isNotEmpty()) {
+            val matchFile = stagedPath.resolve("matches.csv")
+            Files.newBufferedWriter(matchFile, StandardCharsets.UTF_8).use { writer ->
+                writer.append(RelationalWriteSupport.MATCH_COLUMNS.joinToString(","))
+                writer.append('\n')
+                matchRows.values.forEach { row ->
+                    writeCsvRow(writer, row)
+                }
+            }
+        }
+        if (inningsRows.isNotEmpty()) {
+            val inningsFile = stagedPath.resolve("innings.csv")
+            Files.newBufferedWriter(inningsFile, StandardCharsets.UTF_8).use { writer ->
+                writer.append(RelationalWriteSupport.INNINGS_COLUMNS.joinToString(","))
+                writer.append('\n')
+                inningsRows.values.forEach { row ->
+                    writeCsvRow(writer, row)
+                }
+            }
+        }
+        tableWriters.values.forEach(TableWriterState::close)
+
+        if (publishBundleOverride != null) {
+            publishBundleOverride.invoke(stagedPath, outputPath)
+        } else {
+            JournaledMatchReplace.replace(stagedPath, outputPath, JournaledReplaceKind.DIRECTORY)
+        }
+        completed = true
+    }
+
+    fun close() {
+        var failure: Exception? = null
+        tableWriters.values.forEach { writer ->
+            try {
+                writer.close()
+            } catch (e: Exception) {
+                failure = failure.withSuppressed(e)
+            }
+        }
+        try {
+            if (!JournaledMatchReplace.hasPendingJournal(outputPath, JournaledReplaceKind.DIRECTORY)) {
+                deleteDirectory(stagedPath)
+            }
+        } catch (e: Exception) {
+            failure = failure.withSuppressed(e)
+        }
+        failure?.let { throw it }
     }
 
     private fun applyUpdate(row: RelationalRow) {
@@ -98,7 +150,6 @@ internal class CsvOutputState(
 
             else -> error("CSV output does not support updates for ${row.tableName}")
         }
-        updatedTables += row.tableName
     }
 
     private fun rowMatches(row: RelationalRow, headers: List<String>, values: List<Any?>): Boolean {
@@ -115,11 +166,70 @@ internal class CsvOutputState(
         }
     }
 
+    private class TableWriterState(
+        val tableName: String,
+        val file: Path
+    ) : AutoCloseable {
+        private var writer: BufferedWriter? = null
+        var hasHeaders: Boolean = false
+
+        fun ensureHeaders(headers: List<String>) {
+            if (hasHeaders) return
+            val w = getOrCreateWriter()
+            w.append(headers.joinToString(","))
+            w.append('\n')
+            hasHeaders = true
+        }
+
+        fun writeRow(values: List<Any?>) {
+            val w = getOrCreateWriter()
+            writeCsvRow(w, values)
+        }
+
+        fun flush() {
+            writer?.flush()
+        }
+
+        fun currentSize(): Long {
+            flush()
+            return if (Files.exists(file)) Files.size(file) else 0L
+        }
+
+        fun truncate(size: Long) {
+            flush()
+            close()
+            if (size == 0L) {
+                Files.deleteIfExists(file)
+                hasHeaders = false
+            } else {
+                Files.newByteChannel(file, StandardOpenOption.WRITE).use { channel ->
+                    channel.truncate(size)
+                }
+            }
+        }
+
+        private fun getOrCreateWriter(): BufferedWriter {
+            writer?.let { return it }
+            val w = Files.newBufferedWriter(
+                file,
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND
+            )
+            writer = w
+            return w
+        }
+
+        override fun close() {
+            writer?.close()
+            writer = null
+        }
+    }
+
     private data class Snapshot(
-        val pendingRows: Map<String, CsvPendingTable>,
         val matchRows: Map<Long, List<Any?>>,
         val inningsRows: Map<Long, List<Any?>>,
-        val updatedTables: Set<String>
+        val tableOffsets: Map<String, Long>
     )
 }
 
@@ -128,7 +238,5 @@ private fun <K, V> MutableMap<K, V>.replaceWith(values: Map<K, V>) {
     putAll(values)
 }
 
-private fun <T> MutableSet<T>.replaceWith(values: Set<T>) {
-    clear()
-    addAll(values)
-}
+private fun Exception?.withSuppressed(other: Exception): Exception =
+    this?.also { it.addSuppressed(other) } ?: other

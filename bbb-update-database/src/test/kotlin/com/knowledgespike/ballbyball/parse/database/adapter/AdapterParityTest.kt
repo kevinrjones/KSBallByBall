@@ -53,6 +53,7 @@ class AdapterParityTest {
                 session.commit()
                 jdbc.commit()
                 csv.commit()
+                csv.complete()
 
                 expectThat(csvMatchFacts(csvOutput, MATCH_ID)).isEqualTo(session.matchFacts(MATCH_ID))
             }
@@ -90,6 +91,7 @@ class AdapterParityTest {
                     session.commit()
                     jdbc.commit()
                     csv.commit()
+                    csv.complete()
                     script.commit()
                     script.complete()
 

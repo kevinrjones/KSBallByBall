@@ -8,6 +8,40 @@ The historical log below is retained for traceability. At more than 5,700 lines 
 
 # Project Memory
 
+## Task: Staged streaming CSV output optimization
+
+### Title
+
+Staged streaming CSV output optimization
+
+### Date/time completed
+
+2026-10-19 10:45
+
+### What was shipped
+
+- Replaced per-match O(N^2) CSV file copying and repeated directory swaps with staged streaming CSV writers.
+- Table writers stream directly to staged files during match transactions and support rollback via byte-offset file truncation.
+- Buffered `matches` and `innings` records in memory to support in-match updates without full file rewrites.
+- Single atomic journaled directory publication occurs on `complete()`.
+- Added ADR 0050 documenting the architectural decision.
+
+### Key decisions
+
+- Table writes stream to staging directory; on rollback, writers truncate to snapshot byte size.
+- `complete()` performs single atomic directory replacement.
+- Failures or early close clean up staging directory and leave target directory untouched.
+
+### Gotchas
+
+- Uncommitted writes outside an active match transaction or completing with an active match transaction are rejected.
+
+### Test coverage areas
+
+- `CsvOutputAdapterTest` covering transaction rollback, byte truncation, error handling, in-match updates, and publication on `complete()`.
+- `AdapterParityTest` parity between JDBC, SQL script, and CSV adapters.
+- Full `./gradlew check` across all modules.
+
 ## Task: Fix CSV journal durability P1
 
 ### Title
