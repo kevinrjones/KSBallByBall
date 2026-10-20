@@ -72,7 +72,21 @@ internal class RelationalMatchSession(
             ?: false
 
     fun upsertPerson(sourceId: String, fullName: String, caId: Int): Long {
-        identityStore.findPersonKey(sourceId)?.let { return it }
+        val existingKey = identityStore.findPersonKey(sourceId)
+        if (existingKey != null) {
+            val existingCaId = identityStore.findPersonCaId(sourceId) ?: 0
+            if (caId != 0 && existingCaId == 0) {
+                emitUpdate(
+                    tableName = "people",
+                    columns = listOf("ca_id"),
+                    values = listOf(caId),
+                    whereColumns = listOf("id"),
+                    whereValues = listOf(existingKey)
+                )
+                identityStore.setPersonCaId(sourceId, caId)
+            }
+            return existingKey
+        }
         val identityKey = identityStore.allocateKey(IdentitySequence.PERSON)
         val (sortNamePart, otherNamePart) = getNameParts(fullName)
         val key = identityKey.resolve(
@@ -83,7 +97,7 @@ internal class RelationalMatchSession(
                 generatedColumns = identityKey.generatedColumns()
             )
         )
-        identityStore.rememberPerson(sourceId, key)
+        identityStore.rememberPerson(sourceId, key, caId)
         return key
     }
 

@@ -10,7 +10,9 @@ import java.time.LocalDate
 
 internal interface MatchIdentityStore {
     fun findPersonKey(sourceId: String): Long?
-    fun rememberPerson(sourceId: String, key: Long)
+    fun findPersonCaId(sourceId: String): Int?
+    fun rememberPerson(sourceId: String, key: Long, caId: Int = 0)
+    fun setPersonCaId(sourceId: String, caId: Int)
     fun findTeam(name: String): Team?
     fun rememberTeam(team: Team)
     fun findGround(name: String): Ground?

@@ -132,6 +132,48 @@ class RelationalMatchSessionTest {
         expectThat(row.generatedColumns).isEqualTo(emptySet())
     }
 
+    @Test
+    fun `given an existing person with caId 0 when upserting with non-zero caId then session emits a ca_id update`() {
+        val sink = RecordingRelationalSink()
+        val identityStore = IdentityCore()
+        val session = RelationalMatchSession(sink, identityStore)
+
+        val firstKey = session.upsertPerson("b4a23876", "AAA Amsterdam", 0)
+        val secondKey = session.upsertPerson("b4a23876", "AAA Amsterdam", 949070)
+
+        expectThat(secondKey).isEqualTo(firstKey)
+        expectThat(sink.rows).hasSize(2)
+        val insert = sink.rows.first()
+        expectThat(insert.operation).isEqualTo(RelationalRowOperation.INSERT)
+        expectThat(insert.tableName).isEqualTo("people")
+        expectThat(insert.values).isEqualTo(listOf(1L, "b4a23876", "AAA Amsterdam", "Amsterdam", "AAA", 0))
+
+        val update = sink.rows.last()
+        expectThat(update.operation).isEqualTo(RelationalRowOperation.UPDATE)
+        expectThat(update.tableName).isEqualTo("people")
+        expectThat(update.columns).isEqualTo(listOf("ca_id"))
+        expectThat(update.values).isEqualTo(listOf(949070))
+        expectThat(update.whereColumns).isEqualTo(listOf("id"))
+        expectThat(update.whereValues).isEqualTo(listOf(1L))
+        expectThat(identityStore.findPersonCaId("b4a23876")).isEqualTo(949070)
+    }
+
+    @Test
+    fun `given an existing person with non-zero caId when upserting again then no additional update is emitted`() {
+        val sink = RecordingRelationalSink()
+        val identityStore = IdentityCore()
+        val session = RelationalMatchSession(sink, identityStore)
+
+        val firstKey = session.upsertPerson("b4a23876", "AAA Amsterdam", 949070)
+        val secondKey = session.upsertPerson("b4a23876", "AAA Amsterdam", 949070)
+        val thirdKey = session.upsertPerson("b4a23876", "AAA Amsterdam", 0)
+
+        expectThat(secondKey).isEqualTo(firstKey)
+        expectThat(thirdKey).isEqualTo(firstKey)
+        expectThat(sink.rows).hasSize(1)
+        expectThat(identityStore.findPersonCaId("b4a23876")).isEqualTo(949070)
+    }
+
     private fun sampleMatch() = MatchRecord(
         canonicalMatchId = canonicalMatchId,
         fileName = "match.json",

@@ -20,6 +20,7 @@ internal class CsvOutputState(
     private val tableWriters = mutableMapOf<String, TableWriterState>()
     private val matchRows = linkedMapOf<Long, List<Any?>>()
     private val inningsRows = linkedMapOf<Long, List<Any?>>()
+    private val peopleRows = linkedMapOf<Long, List<Any?>>()
     private var snapshot: Snapshot? = null
     private var completed = false
 
@@ -29,6 +30,7 @@ internal class CsvOutputState(
         snapshot = Snapshot(
             matchRows = matchRows.toMap(),
             inningsRows = inningsRows.toMap(),
+            peopleRows = peopleRows.toMap(),
             tableOffsets = tableOffsets
         )
     }
@@ -45,6 +47,7 @@ internal class CsvOutputState(
         val snap = snapshot ?: return
         matchRows.replaceWith(snap.matchRows)
         inningsRows.replaceWith(snap.inningsRows)
+        peopleRows.replaceWith(snap.peopleRows)
         tableWriters.forEach { (name, writer) ->
             val prevSize = snap.tableOffsets[name] ?: 0L
             if (writer.currentSize() > prevSize) {
@@ -54,10 +57,9 @@ internal class CsvOutputState(
         snapshot = null
     }
 
-    fun emitRow(row: RelationalRow): Long? {
+    fun emitRow(row: RelationalRow) {
         if (row.operation == RelationalRowOperation.UPDATE) {
             applyUpdate(row)
-            return null
         }
         when (row.tableName) {
             "matches" -> {
@@ -70,15 +72,19 @@ internal class CsvOutputState(
                 inningsRows[rowValues.getValue("id") as Long] = row.values.toList()
             }
 
+            "people" -> {
+                val rowValues = row.columns.zip(row.values).toMap()
+                peopleRows[rowValues.getValue("id") as Long] = row.values.toList()
+            }
+
             else -> {
                 val table = tableWriters.getOrPut(row.tableName) {
-                    TableWriterState(row.tableName, stagedPath.resolve("${row.tableName}.csv"))
+                    TableWriterState(stagedPath.resolve("${row.tableName}.csv"))
                 }
                 table.ensureHeaders(row.columns)
                 table.writeRow(row.values)
             }
         }
-        return null
     }
 
     fun complete() {
@@ -99,6 +105,16 @@ internal class CsvOutputState(
                 writer.append(RelationalWriteSupport.INNINGS_COLUMNS.joinToString(","))
                 writer.append('\n')
                 inningsRows.values.forEach { row ->
+                    writeCsvRow(writer, row)
+                }
+            }
+        }
+        if (peopleRows.isNotEmpty()) {
+            val peopleFile = stagedPath.resolve("people.csv")
+            Files.newBufferedWriter(peopleFile, StandardCharsets.UTF_8).use { writer ->
+                writer.append(RelationalWriteSupport.PERSON_COLUMNS.joinToString(","))
+                writer.append('\n')
+                peopleRows.values.forEach { row ->
                     writeCsvRow(writer, row)
                 }
             }
@@ -148,6 +164,13 @@ internal class CsvOutputState(
                 inningsRows[entry.key] = updatedValues(row, RelationalWriteSupport.INNINGS_COLUMNS, entry.value)
             }
 
+            "people" -> {
+                val entry = peopleRows.entries.firstOrNull { (_, values) ->
+                    rowMatches(row, RelationalWriteSupport.PERSON_COLUMNS, values)
+                } ?: error("No known people row matches the requested update")
+                peopleRows[entry.key] = updatedValues(row, RelationalWriteSupport.PERSON_COLUMNS, entry.value)
+            }
+
             else -> error("CSV output does not support updates for ${row.tableName}")
         }
     }
@@ -167,7 +190,6 @@ internal class CsvOutputState(
     }
 
     private class TableWriterState(
-        val tableName: String,
         val file: Path
     ) : AutoCloseable {
         private var writer: BufferedWriter? = null
@@ -229,6 +251,7 @@ internal class CsvOutputState(
     private data class Snapshot(
         val matchRows: Map<Long, List<Any?>>,
         val inningsRows: Map<Long, List<Any?>>,
+        val peopleRows: Map<Long, List<Any?>>,
         val tableOffsets: Map<String, Long>
     )
 }

@@ -28,6 +28,7 @@ internal class IdentityCore : MatchIdentityStore {
      * - Handles scenarios where entries can be added, modified, or removed with rollback support if needed.
      */
     private val people = TransactionMap<String, Long>()
+    private val peopleCaId = TransactionMap<String, Int>()
     /**
      * Stores and manages the set of teams within the identity core context.
      *
@@ -269,14 +270,22 @@ internal class IdentityCore : MatchIdentityStore {
      */
     override fun findPersonKey(sourceId: String): Long? = people[sourceId]
 
+    override fun findPersonCaId(sourceId: String): Int? = peopleCaId[sourceId]
+
     /**
      * Associates a person identified by a source ID with a specific key.
      *
      * @param sourceId A unique identifier for the person from the source system.
      * @param key The unique key to be associated with the person.
+     * @param caId The CricketArchive identifier for the person, defaulting to 0.
      */
-    override fun rememberPerson(sourceId: String, key: Long) {
+    override fun rememberPerson(sourceId: String, key: Long, caId: Int) {
         people[sourceId] = key
+        peopleCaId[sourceId] = caId
+    }
+
+    override fun setPersonCaId(sourceId: String, caId: Int) {
+        peopleCaId[sourceId] = caId
     }
 
     /**
@@ -621,6 +630,7 @@ internal class IdentityCore : MatchIdentityStore {
     override fun restore(snapshot: IdentityStoreSnapshot) {
         require(snapshot is Snapshot) { "Snapshot was created by a different identity store" }
         people.rollback()
+        peopleCaId.rollback()
         teams.rollback()
         grounds.rollback()
         dates.rollback()
@@ -669,6 +679,7 @@ internal class IdentityCore : MatchIdentityStore {
      */
     override fun commit() {
         people.commit()
+        peopleCaId.commit()
         teams.commit()
         grounds.commit()
         dates.commit()
@@ -711,6 +722,7 @@ internal class IdentityCore : MatchIdentityStore {
      */
     private fun beginTransactions() {
         people.beginTransaction()
+        peopleCaId.beginTransaction()
         teams.beginTransaction()
         grounds.beginTransaction()
         dates.beginTransaction()

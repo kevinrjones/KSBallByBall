@@ -120,6 +120,26 @@ class CsvOutputAdapterTest {
     }
 
     @Test
+    fun `given person inserted with zero caId when updated with non-zero caId then csv contains updated caId`() {
+        val output = Files.createTempDirectory("warehouse-csv-person-caid")
+        val adapter = CsvOutputAdapter(output)
+
+        adapter.beginMatch()
+        adapter.upsertPerson("b4a23876", "AAA Amsterdam", 0)
+        adapter.commit()
+
+        adapter.beginMatch()
+        adapter.upsertPerson("b4a23876", "AAA Amsterdam", 949070)
+        adapter.commit()
+        adapter.complete()
+        adapter.close()
+
+        val csv = Files.readString(output.resolve("people.csv"))
+        expectThat(csv).contains("id,source_person_id,full_name,sort_name_part,other_name_part,ca_id")
+        expectThat(csv).contains("1,b4a23876,AAA Amsterdam,Amsterdam,AAA,949070")
+    }
+
+    @Test
     fun `given an existing innings when declaration changes then csv contains the updated value`() {
         val output = Files.createTempDirectory("warehouse-csv-innings-declared")
         val adapter = CsvOutputAdapter(output)

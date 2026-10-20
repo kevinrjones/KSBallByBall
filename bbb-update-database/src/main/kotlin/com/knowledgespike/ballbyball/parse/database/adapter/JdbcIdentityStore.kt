@@ -17,8 +17,18 @@ internal class JdbcIdentityStore(
 ) : MatchIdentityStore by identityCore {
 
     override fun findPersonKey(sourceId: String): Long? =
-        identityCore.findPersonKey(sourceId) ?: queryKey("select id from people where source_person_id = ?", sourceId)
-            ?.also { identityCore.rememberPerson(sourceId, it) }
+        identityCore.findPersonKey(sourceId) ?: queryPerson("select id, ca_id from people where source_person_id = ?", sourceId)
+
+    override fun findPersonCaId(sourceId: String): Int? =
+        identityCore.findPersonCaId(sourceId)
+
+    override fun rememberPerson(sourceId: String, key: Long, caId: Int) {
+        identityCore.rememberPerson(sourceId, key, caId)
+    }
+
+    override fun setPersonCaId(sourceId: String, caId: Int) {
+        identityCore.setPersonCaId(sourceId, caId)
+    }
 
     override fun findTeam(name: String): Team? = identityCore.findTeam(name) ?: queryKey(
         "select id from teams where team_name = ?",
@@ -155,6 +165,17 @@ internal class JdbcIdentityStore(
         IdentitySequence.WICKET_SOURCE -> IdentityKey(nextSourceId("source_wicket_id", "wickets"))
     }
 
+
+    private fun queryPerson(sql: String, sourceId: String): Long? = connection.prepareStatement(sql).use { statement ->
+        statement.setString(1, sourceId)
+        statement.executeQuery().use { results ->
+            if (!results.next()) return@use null
+            val id = results.getLong("id")
+            val caId = results.getInt("ca_id")
+            identityCore.rememberPerson(sourceId, id, caId)
+            id
+        }
+    }
 
     private fun nextSourceId(column: String, table: String): Long =
         queryKey("select coalesce(max($column), 0) + 1 from $table")

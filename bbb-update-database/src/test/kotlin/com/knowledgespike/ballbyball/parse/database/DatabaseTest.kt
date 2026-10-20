@@ -79,6 +79,48 @@ class DatabaseTest {
     }
 
     @Test
+    fun `given preseeded people with zero caId when match with peopleCaId written then people are updated with caId in sql and csv`() {
+        val base = cricSheetWithFielder()
+        val matchWithCaId = base.copy(
+            match = base.match.copy(
+                registry = base.match.registry.copy(
+                    people = mapOf(
+                        "AAA Amsterdam" to "b4a23876",
+                        "Batter" to "batter-id",
+                        "Bowler" to "bowler-id",
+                        "NonStriker" to "non-striker-id",
+                        "Fielder" to "fielder-id"
+                    ),
+                    peopleCaId = mapOf("b4a23876" to 949070, "batter-id" to 101, "bowler-id" to 102)
+                )
+            )
+        )
+
+        // 1. Test SQL Script Output
+        val scriptOutput = Files.createTempFile("warehouse-preseeded-test", ".sql")
+        SqlScriptOutputAdapter(scriptOutput).use { adapter ->
+            val db = Database(adapter)
+            db.writeAllPeople(Stream.of(PersonEntity("b4a23876", "AAA Amsterdam", 0)))
+            db.writeMatch("/new/root/875477.json", matchWithCaId)
+            adapter.complete()
+        }
+        val sql = Files.readString(scriptOutput)
+        expectThat(sql).contains("INSERT INTO people (id, source_person_id, full_name, sort_name_part, other_name_part, ca_id) VALUES (1, 'b4a23876', 'AAA Amsterdam', 'Amsterdam', 'AAA', 0);")
+        expectThat(sql).contains("UPDATE people SET ca_id = 949070 WHERE id = 1;")
+
+        // 2. Test CSV Output
+        val csvOutput = Files.createTempDirectory("warehouse-preseeded-csv")
+        CsvOutputAdapter(csvOutput).use { adapter ->
+            val db = Database(adapter)
+            db.writeAllPeople(Stream.of(PersonEntity("b4a23876", "AAA Amsterdam", 0)))
+            db.writeMatch("/new/root/875477.json", matchWithCaId)
+            adapter.complete()
+        }
+        val peopleCsv = Files.readString(csvOutput.resolve("people.csv"))
+        expectThat(peopleCsv).contains("1,b4a23876,AAA Amsterdam,Amsterdam,AAA,949070")
+    }
+
+    @Test
     fun `given a failed match write when writing then the adapter rolls back`() {
         val adapter = FailingMatchOutputAdapter()
 

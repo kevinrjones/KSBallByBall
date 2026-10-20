@@ -40,12 +40,14 @@ object Translate {
      */
     fun getPlayers(people: JsonObject, cricSheet: BbbMatchData): Map<String, List<Person>> {
         val peopleInRegistry = cricSheet.match.registry.people
+        val caIds = cricSheet.match.registry.peopleCaId.orEmpty()
         return people.mapValues { (_, players) ->
             players.jsonArray.map { person ->
                 val name = person.jsonPrimitive.content
                 val id = peopleInRegistry[name]
                     ?: throw InvalidStateException("Should be one matching person in the registry, actually 0")
-                Person(id, name)
+                val caId = caIds[id] ?: 0
+                Person(id, name, caId)
             }
         }
     }
@@ -60,10 +62,12 @@ object Translate {
      */
     fun getOfficials(officials: List<String>?, cricSheet: BbbMatchData): List<Person> {
         val peopleInRegistry = cricSheet.match.registry.people
+        val caIds = cricSheet.match.registry.peopleCaId.orEmpty()
         return officials?.map { name ->
             val id = peopleInRegistry[name]
                 ?: throw InvalidStateException("Should be one matching person in the registry, actually 0")
-            Person(id, name)
+            val caId = caIds[id] ?: 0
+            Person(id, name, caId)
         } ?: emptyList()
     }
 }

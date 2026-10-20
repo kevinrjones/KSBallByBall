@@ -185,16 +185,43 @@ object PlayerNameMatcher {
     ): Boolean {
         if (sourceFirstParts.isEmpty() || candidateFirstParts.isEmpty()) return false
 
-        if (sourceFirstParts.size == 1 && candidateFirstParts.first() == sourceFirstParts.first()) {
+        if (sourceFirstParts == candidateFirstParts) {
             return true
         }
 
-        val sourceInitials = sourceFirstParts.joinToString("") { it }
-        val candidateInitials = candidateFirstParts.mapNotNull { it.firstOrNull() }.joinToString("")
+        val sourceInitialsList = extractInitials(sourceFirstParts)
+        val candidateInitialsList = extractInitials(candidateFirstParts)
 
-        if (sourceInitials == candidateInitials) return true
-        if (sourceInitials.isNotEmpty() && candidateInitials.startsWith(sourceInitials)) return true
+        for (sInit in sourceInitialsList) {
+            for (cInit in candidateInitialsList) {
+                if (sInit == cInit) return true
+                if (sInit.isNotEmpty() && cInit.startsWith(sInit)) return true
+                if (cInit.isNotEmpty() && sInit.startsWith(cInit)) return true
+            }
+        }
+
+        if (sourceFirstParts.all { part ->
+                part in candidateFirstParts ||
+                    candidateFirstParts.any { it.startsWith(part) }
+            }
+        ) {
+            return true
+        }
 
         return false
+    }
+
+    internal fun extractInitials(parts: List<String>): List<String> {
+        if (parts.isEmpty()) return emptyList()
+        val initials = mutableSetOf<String>()
+
+        val perWord = parts.mapNotNull { it.firstOrNull() }.joinToString("")
+        if (perWord.isNotEmpty()) initials.add(perWord)
+
+        if (parts.size == 1) {
+            initials.add(parts.first())
+        }
+
+        return initials.toList()
     }
 }

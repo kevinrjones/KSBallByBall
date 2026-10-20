@@ -95,6 +95,25 @@ class SqlScriptOutputAdapterTest {
     }
 
     @Test
+    fun `given person inserted with zero caId when updated with non-zero caId then sql contains update statement`() {
+        val output = Files.createTempFile("warehouse-person-caid", ".sql")
+
+        SqlScriptOutputAdapter(output).use { adapter ->
+            adapter.beginMatch()
+            adapter.upsertPerson("b4a23876", "AAA Amsterdam", 0)
+            adapter.commit()
+
+            adapter.beginMatch()
+            adapter.upsertPerson("b4a23876", "AAA Amsterdam", 949070)
+            adapter.commit()
+            adapter.complete()
+        }
+
+        val sql = Files.readString(output)
+        expectThat(sql).contains("UPDATE people SET ca_id = 949070 WHERE id = 1;")
+    }
+
+    @Test
     fun `given a forced public ID collision then the second canonical match is rejected`() {
         val output = Files.createTempFile("warehouse-collision", ".sql")
         val first = testMatchRecord("1890a7a8-f76d-5f36-89f7-39b0319044b0")

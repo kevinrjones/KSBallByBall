@@ -138,4 +138,47 @@ class StatsPlayerLinkerTest {
         expectThat(results).hasSize(1)
         expectThat(results[0].statsPlayerId).isNull()
     }
+
+    @Test
+    fun `given match with umpires and referees when linking then matches and caches official IDs`() {
+        val statsRepository = object : StatsPlayerRepository {
+            override fun playersForMatch(matchCaId: SourceCaId): List<StatsRosterPlayer> = listOf(
+                StatsRosterPlayer(
+                    playerId = StatsPlayerId.from(401),
+                    fullName = "A Ali Baig",
+                    knownAs = "A Ali Baig",
+                    surname = "Baig"
+                ),
+                StatsRosterPlayer(
+                    playerId = StatsPlayerId.from(402),
+                    fullName = "Ranjan S Madugalle",
+                    knownAs = "RS Madugalle",
+                    surname = "Madugalle"
+                )
+            )
+        }
+        val memoryDb = mutableMapOf<SourcePersonId, StatsPlayerId>()
+        val dbRepository = object : PlayerIdentityRepository {
+            override fun loadAllPlayerMappings(): Map<SourcePersonId, StatsPlayerId> = memoryDb
+            override fun savePlayerMapping(sourcePersonId: SourcePersonId, fullName: String, statsPlayerId: StatsPlayerId) {
+                memoryDb[sourcePersonId] = statsPlayerId
+            }
+        }
+        val cache = ThreadSafePlayerCache()
+        val linker = StatsPlayerLinker(statsRepository, dbRepository, cache)
+
+        val officials = mapOf("AA Baig" to "umpire_1", "RS Madugalle" to "referee_1")
+        val results = linker.linkPlayers(SourceCaId.from("match_officials_1"), officials)
+
+        expectThat(results).hasSize(2)
+        val baigResult = results.find { it.sourceName == "AA Baig" }
+        val madugalleResult = results.find { it.sourceName == "RS Madugalle" }
+
+        expectThat(baigResult?.statsPlayerId?.value).isEqualTo(401)
+        expectThat(madugalleResult?.statsPlayerId?.value).isEqualTo(402)
+        expectThat(cache[SourcePersonId.from("umpire_1")]?.value).isEqualTo(401)
+        expectThat(cache[SourcePersonId.from("referee_1")]?.value).isEqualTo(402)
+        expectThat(memoryDb[SourcePersonId.from("umpire_1")]?.value).isEqualTo(401)
+        expectThat(memoryDb[SourcePersonId.from("referee_1")]?.value).isEqualTo(402)
+    }
 }

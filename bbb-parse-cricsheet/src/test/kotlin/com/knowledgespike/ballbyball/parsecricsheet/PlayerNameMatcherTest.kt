@@ -64,6 +64,27 @@ class PlayerNameMatcherTest {
         surname = "Marsh"
     )
 
+    private val aAliBaig = StatsRosterPlayer(
+        playerId = StatsPlayerId.from(9),
+        fullName = "A Ali Baig",
+        knownAs = "A Ali Baig",
+        surname = "Baig"
+    )
+
+    private val ranjanMadugalle = StatsRosterPlayer(
+        playerId = StatsPlayerId.from(10),
+        fullName = "Ranjan S Madugalle",
+        knownAs = "RS Madugalle",
+        surname = "Madugalle"
+    )
+
+    private val ananthapadmanabhan = StatsRosterPlayer(
+        playerId = StatsPlayerId.from(11),
+        fullName = "KN Ananthapadmanabhan",
+        knownAs = "KN Ananthapadmanabhan",
+        surname = "Ananthapadmanabhan"
+    )
+
     private val testRoster = listOf(
         viratKohli,
         rohitSharma,
@@ -72,7 +93,10 @@ class PlayerNameMatcherTest {
         fDuPlessis,
         jeanPaulDuminy,
         mitchellMarsh,
-        shaunMarsh
+        shaunMarsh,
+        aAliBaig,
+        ranjanMadugalle,
+        ananthapadmanabhan
     )
 
     @Test
@@ -160,6 +184,33 @@ class PlayerNameMatcherTest {
         val result = PlayerNameMatcher.matchPlayer("M Marsh", rosterWithAmbiguity)
 
         expectThat(result).isNull()
+    }
+
+    @Test
+    fun `given compact initials when matching against partial name then matches correctly`() {
+        val aaBaigMatch = PlayerNameMatcher.matchPlayer("AA Baig", testRoster)
+        expectThat(aaBaigMatch).isNotNull().isEqualTo(aAliBaig)
+
+        val aBaigMatch = PlayerNameMatcher.matchPlayer("A Baig", testRoster)
+        expectThat(aBaigMatch).isNotNull().isEqualTo(aAliBaig)
+
+        val abbasAliBaigMatch = PlayerNameMatcher.matchPlayer("Abbas Ali Baig", testRoster)
+        expectThat(abbasAliBaigMatch).isNotNull().isEqualTo(aAliBaig)
+
+        val aliBaigMatch = PlayerNameMatcher.matchPlayer("Ali Baig", testRoster)
+        expectThat(aliBaigMatch).isNotNull().isEqualTo(aAliBaig)
+    }
+
+    @Test
+    fun `given umpire or referee name variations when matching then matches correctly`() {
+        val refereeMatch = PlayerNameMatcher.matchPlayer("RS Madugalle", testRoster)
+        expectThat(refereeMatch).isNotNull().isEqualTo(ranjanMadugalle)
+
+        val fullRefereeMatch = PlayerNameMatcher.matchPlayer("Ranjan Madugalle", testRoster)
+        expectThat(fullRefereeMatch).isNotNull().isEqualTo(ranjanMadugalle)
+
+        val reserveUmpireMatch = PlayerNameMatcher.matchPlayer("K.N. Ananthapadmanabhan", testRoster)
+        expectThat(reserveUmpireMatch).isNotNull().isEqualTo(ananthapadmanabhan)
     }
 
     @Test
