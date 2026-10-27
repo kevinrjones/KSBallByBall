@@ -19,7 +19,7 @@ class JdbcStatsPlayerRepositoryTest {
             val repository = JdbcStatsPlayerRepository(connection)
             val roster = repository.playersForMatch(SourceCaId.from("a12345"))
 
-            expectThat(roster).hasSize(6)
+            expectThat(roster).hasSize(7)
             val virat = roster.find { it.fullName == "Virat Kohli" }
             expectThat(virat).isNotNull()
             expectThat(virat?.playerId?.value).isEqualTo(101)
@@ -31,6 +31,12 @@ class JdbcStatsPlayerRepositoryTest {
             expectThat(rohit?.playerId?.value).isEqualTo(102)
             expectThat(rohit?.knownAs).isEqualTo("Rohit Sharma")
             expectThat(rohit?.surname).isEqualTo("Sharma")
+
+            val subFielder = roster.find { it.fullName == "Kevin White" }
+            expectThat(subFielder).isNotNull()
+            expectThat(subFielder?.playerId?.value).isEqualTo(301)
+            expectThat(subFielder?.knownAs).isEqualTo("Kevin White")
+            expectThat(subFielder?.surname).isEqualTo("White")
 
             val umpire = roster.find { it.fullName == "A Ali Baig" }
             expectThat(umpire).isNotNull()
@@ -59,6 +65,81 @@ class JdbcStatsPlayerRepositoryTest {
             val roster = repository.playersForMatch(SourceCaId.from("unknown_ca_id"))
 
             expectThat(roster).hasSize(0)
+        }
+    }
+
+    @Test
+    fun `given exact name in referee tables when querying global matches then returns one distinct id`() {
+        withStatsDatabase { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO MatchReferees (Id, MatchRefereesId, FullName, SortNamePart, OtherNamePart) " +
+                        "VALUES (2, 205, 'J Chikange', 'Chikange', 'J')"
+                )
+                statement.execute(
+                    "INSERT INTO Officials (Id, OfficialId, FullName, SortNamePart, OtherNamePart) " +
+                        "VALUES (2, 205, 'J Chikange', 'Chikange', 'J')"
+                )
+            }
+
+            val candidates = JdbcStatsPlayerRepository(connection).exactMatchesForFullName("J Chikange")
+
+            expectThat(candidates).hasSize(1)
+            expectThat(candidates.single().playerId.value).isEqualTo(205)
+        }
+    }
+
+    @Test
+    fun `given exact name belongs to multiple ids when querying global matches then returns all distinct candidates`() {
+        withStatsDatabase { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO Players (Id, PlayerId, FullName, SortNamePart, OtherNamePart) " +
+                        "VALUES (4, 206, 'J Chikange', 'Chikange', 'J')"
+                )
+                statement.execute(
+                    "INSERT INTO MatchReferees (Id, MatchRefereesId, FullName, SortNamePart, OtherNamePart) " +
+                        "VALUES (2, 205, 'J Chikange', 'Chikange', 'J')"
+                )
+            }
+
+            val candidates = JdbcStatsPlayerRepository(connection).exactMatchesForFullName("J Chikange")
+
+            expectThat(candidates).hasSize(2)
+            expectThat(candidates.map { it.playerId.value }.toSet()).isEqualTo(setOf(205, 206))
+        }
+    }
+
+    @Test
+    fun `given exact name in each identity table when querying then uses the external id column`() {
+        withStatsDatabase { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO Scorers (Id, ScorersId, FullName, SortNamePart, OtherNamePart) " +
+                        "VALUES (1, 205, 'Scorekeeper One', 'One', 'Scorekeeper')"
+                )
+                statement.execute(
+                    "INSERT INTO Officials (Id, OfficialId, FullName, SortNamePart, OtherNamePart) " +
+                        "VALUES (1, 206, 'Generic Official', 'Official', 'Generic')"
+                )
+            }
+            val repository = JdbcStatsPlayerRepository(connection)
+            val expectedIds = mapOf(
+                "Virat Kohli" to 101,
+                "A Ali Baig" to 201,
+                "Chettithody Shamshuddin" to 202,
+                "KN Ananthapadmanabhan" to 203,
+                "Ranjan Madugalle" to 204,
+                "Scorekeeper One" to 205,
+                "Generic Official" to 206
+            )
+
+            expectedIds.forEach { (name, id) ->
+                val candidates = repository.exactMatchesForFullName(name)
+
+                expectThat(candidates).hasSize(1)
+                expectThat(candidates.single().playerId.value).isEqualTo(id)
+            }
         }
     }
 
@@ -125,7 +206,20 @@ class JdbcStatsPlayerRepositoryTest {
                         PlayerId INTEGER NOT NULL,
                         FullName TEXT NOT NULL,
                         SortNamePart TEXT NOT NULL,
-                        OtherNamePart TEXT NOT NULL
+                        OtherNamePart TEXT NOT NULL,
+                        ExpandedFullName TEXT
+                    )
+                    """.trimIndent()
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE Officials (
+                        Id INTEGER PRIMARY KEY,
+                        OfficialId INTEGER NOT NULL,
+                        FullName TEXT NOT NULL,
+                        SortNamePart TEXT NOT NULL,
+                        OtherNamePart TEXT NOT NULL,
+                        ExpandedFullName TEXT
                     )
                     """.trimIndent()
                 )
@@ -138,6 +232,15 @@ class JdbcStatsPlayerRepositoryTest {
                         FullName TEXT NOT NULL,
                         SortNamePart TEXT NOT NULL,
                         OtherNamePart TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE Fielding (
+                        Id INTEGER PRIMARY KEY,
+                        MatchId INTEGER NOT NULL,
+                        PlayerId INTEGER NOT NULL
                     )
                     """.trimIndent()
                 )
@@ -217,12 +320,25 @@ class JdbcStatsPlayerRepositoryTest {
                     )
                     """.trimIndent()
                 )
+                statement.execute(
+                    """
+                    CREATE TABLE Scorers (
+                        Id INTEGER PRIMARY KEY,
+                        ScorersId INTEGER NOT NULL,
+                        FullName TEXT NOT NULL,
+                        SortNamePart TEXT NOT NULL,
+                        OtherNamePart TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
 
                 statement.execute("INSERT INTO Matches (Id, CaId) VALUES (1, 'a12345')")
                 statement.execute("INSERT INTO Players (Id, PlayerId, FullName, SortNamePart, OtherNamePart) VALUES (1, 101, 'Virat Kohli', 'Kohli', 'Virat')")
                 statement.execute("INSERT INTO Players (Id, PlayerId, FullName, SortNamePart, OtherNamePart) VALUES (2, 102, 'Rohit Gurunath Sharma', 'Sharma', 'Rohit')")
+                statement.execute("INSERT INTO Players (Id, PlayerId, FullName, SortNamePart, OtherNamePart) VALUES (3, 301, 'Kevin White', 'White', 'Kevin')")
                 statement.execute("INSERT INTO PlayersMatches (Id, PlayerId, MatchId, FullName, SortNamePart, OtherNamePart) VALUES (1, 1, 1, 'Virat Kohli', 'Kohli', 'Virat')")
                 statement.execute("INSERT INTO PlayersMatches (Id, PlayerId, MatchId, FullName, SortNamePart, OtherNamePart) VALUES (2, 2, 1, 'Rohit Gurunath Sharma', 'Sharma', 'Rohit')")
+                statement.execute("INSERT INTO Fielding (Id, MatchId, PlayerId) VALUES (1, 1, 3)")
 
                 statement.execute("INSERT INTO Umpires (Id, UmpiresId, FullName, SortNamePart, OtherNamePart) VALUES (1, 201, 'A Ali Baig', 'Baig', 'A Ali')")
                 statement.execute("INSERT INTO UmpiresMatches (PersonId, MatchId) VALUES (1, 1)")

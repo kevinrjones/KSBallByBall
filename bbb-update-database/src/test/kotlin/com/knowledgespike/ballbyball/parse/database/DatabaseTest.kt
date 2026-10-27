@@ -121,6 +121,36 @@ class DatabaseTest {
     }
 
     @Test
+    fun `given player registry when match written then only match persons are inserted with registry caId fallback`() {
+        val playerRegistry = mapOf(
+            "b4a23876" to PersonEntity("b4a23876", "AAA Amsterdam", 949070),
+            "unreferenced-id" to PersonEntity("unreferenced-id", "Unreferenced Player", 123456)
+        )
+        val matchWithoutCaId = cricSheetWithFielder().let { match ->
+            match.copy(
+                match = match.match.copy(
+                    registry = match.match.registry.copy(
+                        people = match.match.registry.people + mapOf("AAA Amsterdam" to "b4a23876"),
+                        peopleCaId = null
+                    )
+                )
+            )
+        }
+
+        val scriptOutput = Files.createTempFile("warehouse-registry-fallback-test", ".sql")
+        SqlScriptOutputAdapter(scriptOutput).use { adapter ->
+            val db = Database(adapter, playerRegistry)
+            db.writeMatch("/new/root/875477.json", matchWithoutCaId)
+            adapter.complete()
+        }
+
+        val sql = Files.readString(scriptOutput)
+        expectThat(sql).contains("INSERT INTO people (id, source_person_id, full_name, sort_name_part, other_name_part, ca_id) VALUES (5, 'b4a23876', 'AAA Amsterdam', 'Amsterdam', 'AAA', 949070);")
+        expectThat(sql).not().contains("Unreferenced Player")
+        expectThat(sql).not().contains("unreferenced-id")
+    }
+
+    @Test
     fun `given a failed match write when writing then the adapter rolls back`() {
         val adapter = FailingMatchOutputAdapter()
 

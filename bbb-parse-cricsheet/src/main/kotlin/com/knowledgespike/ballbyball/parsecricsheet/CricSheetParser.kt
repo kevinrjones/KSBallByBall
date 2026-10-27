@@ -90,7 +90,7 @@ class CricSheetParser(
                 sourceEnvelope.withSourceCaId(null) to failure
             },
             ifRight = { linkedEnvelope ->
-                enrichPlayers(linkedEnvelope) to null
+                enrichPlayers(linkedEnvelope, input, layout) to null
             }
         )
 
@@ -105,13 +105,28 @@ class CricSheetParser(
         }
     }
 
-    private fun enrichPlayers(envelope: SourceMatchEnvelope): SourceMatchEnvelope {
+    private fun enrichPlayers(
+        envelope: SourceMatchEnvelope,
+        input: Path,
+        layout: ParseDirectoryLayout? = null
+    ): SourceMatchEnvelope {
         val linker = playerLinker ?: return envelope
         val sourceCaIdStr = envelope.match.match.sourceCaId ?: return envelope
         val sourceCaId = SourceCaId.of(sourceCaIdStr).getOrNull() ?: return envelope
 
+        val sourceFileName = if (layout != null) {
+            runCatching { layout.input.relativize(input).toString() }
+                .getOrElse { input.toAbsolutePath().normalize().toString() }
+        } else {
+            input.fileName.toString()
+        }
+
         return try {
-            val playerResults = linker.linkPlayers(sourceCaId, envelope.match.match.registry.people)
+            val playerResults = linker.linkPlayers(
+                sourceCaId,
+                envelope.match.match.registry.people,
+                sourceFileName
+            )
             val peopleCaId = playerResults
                 .filter { it.statsPlayerId != null }
                 .associate { it.sourcePersonId.value to it.statsPlayerId!!.value }

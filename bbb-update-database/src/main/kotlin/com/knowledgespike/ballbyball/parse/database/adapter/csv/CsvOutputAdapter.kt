@@ -43,7 +43,7 @@ class CsvOutputAdapter private constructor(
     }
 
     private class AdapterContext(
-        val outputPath: Path,
+        outputPath: Path,
         force: Boolean = false,
         publishBundleOverride: ((Path, Path) -> Unit)? = null
     ) {
@@ -56,7 +56,8 @@ class CsvOutputAdapter private constructor(
         private fun emitRow(row: RelationalRow): Long? {
             check(!closed) { "Cannot write to a closed CSV output adapter" }
             check(transaction.isActive) { "No match transaction is active" }
-            return outputState.emitRow(row)
+            outputState.emitRow(row)
+            return null
         }
 
         fun beginMatch() {

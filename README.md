@@ -90,6 +90,11 @@ if all exact-date attempts miss, it retries ±1 day then ±2 days (earlier befor
 later at each distance), trying margin before plain on each date. Ambiguous and
 invalid-alias results stop the fallback.
 
+Player and official linking first uses match-roster evidence. Unresolved names
+can fall back to an exact stats `FullName` lookup across player and official
+tables only when it yields one distinct stats ID; ambiguous exact names remain
+unresolved.
+
 The linker batches the primary date and all four alternate dates into one
 exact-team lookup and, only when needed, one alias lookup; team IDs are
 preloaded and date/margin priority is applied in memory. The CricketArchive

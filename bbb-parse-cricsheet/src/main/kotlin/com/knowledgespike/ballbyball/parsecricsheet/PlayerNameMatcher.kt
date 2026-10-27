@@ -1,227 +1,158 @@
 package com.knowledgespike.ballbyball.parsecricsheet
 
-import arrow.core.Either
-import arrow.core.raise.Raise
-import arrow.core.raise.either
-import com.knowledgespike.ballbyball.identity.SourcePersonId
-import java.text.Normalizer
-import java.util.Locale
+import com.knowledgespike.ballbyball.parsecricsheet.TokenMatcher.matchesAdjacentExpandedNameTokens
+import com.knowledgespike.ballbyball.parsecricsheet.TokenMatcher.matchesInitialsAndFuzzySurname
+import com.knowledgespike.ballbyball.parsecricsheet.TokenMatcher.matchesInitialsAndSurname
+import com.knowledgespike.ballbyball.parsecricsheet.TokenMatcher.tokenize
 
 /**
- * Encapsulates errors related to invalid [StatsPlayerId] values.
- */
-sealed class StatsPlayerIdError(val message: String) {
-    class Invalid(value: Int?) : StatsPlayerIdError("Stats player ID must be a positive integer: '$value'")
-}
-
-/**
- * Strongly typed identifier for a stats database player.
- */
-@JvmInline
-value class StatsPlayerId private constructor(val value: Int) {
-    companion object {
-        context(raise: Raise<StatsPlayerIdError.Invalid>)
-        operator fun invoke(value: Int?): StatsPlayerId {
-            if (value == null || value <= 0) raise.raise(StatsPlayerIdError.Invalid(value))
-            return StatsPlayerId(value)
-        }
-
-        fun of(value: Int): Either<StatsPlayerIdError.Invalid, StatsPlayerId> = either { invoke(value) }
-
-        fun from(value: Int): StatsPlayerId = requireNotNull(of(value).getOrNull()) {
-            "Stats player ID must be a positive integer"
-        }
-    }
-}
-
-/**
- * Represents a player in a CricketArchive match roster.
- */
-data class StatsRosterPlayer(
-    val playerId: StatsPlayerId,
-    val fullName: String,
-    val knownAs: String? = null,
-    val surname: String? = null
-)
-
-/**
- * Result of linking a source Cricsheet player name/id to a stats player ID.
- */
-data class PlayerMatchResult(
-    val sourcePersonId: SourcePersonId,
-    val sourceName: String,
-    val statsPlayerId: StatsPlayerId?
-)
-
-/**
- * Pure functional matching engine for resolving Cricsheet player names against
- * CricketArchive match roster players.
+ * Object responsible for matching player names from a given source input to a roster of players.
+ * It utilizes normalization, tokenization, similarity metrics, and phonetic matching
+ * to identify potential matches for player names.
  */
 object PlayerNameMatcher {
 
     /**
-     * Attempts to find a unique matching [StatsRosterPlayer] in the given roster for [sourceName].
-     * Returns null if no match or multiple ambiguous matches are found.
+     * Attempts to match a player's name from the provided roster to the given source name
+     * using multiple stages of normalization, tokenization, and fuzzy matching techniques.
+     *
+     * @param sourceName The name string to match against the player roster.
+     * @param roster A list of `StatsRosterPlayer` objects representing the player roster.
+     * @return A `StatsRosterPlayer` object if a unique match is found;
+     *         returns `null` if no match is found, if multiple matches exist,
+     *         or if the source name or roster is invalid.
      */
     fun matchPlayer(
         sourceName: String,
         roster: List<StatsRosterPlayer>
     ): StatsRosterPlayer? {
-        if (sourceName.isBlank() || roster.isEmpty()) return null
+        return compatibleCandidates(sourceName, roster).singleOrNull()
+    }
+
+    /**
+     * Finds all candidates in [roster] compatible with [sourceName] across multi-stage matching tiers:
+     * 1. Exact normalized match (fullName, knownAs, expandedFullName)
+     * 2. Tokenized Initials and Surname match
+     * 3. Fuzzy Surname match with Initials compatibility
+     * 4. Transliteration-normalized Phonetic Surname match with Initials compatibility
+     */
+    fun compatibleCandidates(
+        sourceName: String,
+        roster: List<StatsRosterPlayer>
+    ): List<StatsRosterPlayer> {
+        if (sourceName.isBlank() || roster.isEmpty()) return emptyList()
 
         val normalizedSource = normalize(sourceName)
-        if (normalizedSource.isEmpty()) return null
+        if (normalizedSource.isEmpty()) return emptyList()
 
         // Stage 1: Exact normalized match on fullName or knownAs
         val exactMatches = roster.filter { player ->
             normalize(player.fullName) == normalizedSource ||
-                (player.knownAs != null && normalize(player.knownAs) == normalizedSource)
+                (player.knownAs != null && normalize(player.knownAs) == normalizedSource) ||
+                (player.expandedFullName != null && normalize(player.expandedFullName) == normalizedSource)
         }
-        if (exactMatches.size == 1) {
-            return exactMatches.first()
-        }
-        if (exactMatches.size > 1) {
-            return null
-        }
+        if (exactMatches.isNotEmpty()) return exactMatches
 
         // Stage 2: Tokenized Initials and Surname match
         val sourceTokens = tokenize(normalizedSource)
-        if (sourceTokens.isEmpty()) return null
+        if (sourceTokens.isEmpty()) return emptyList()
+
+        val adjacentExpandedNameMatches = roster.filter { player ->
+            player.expandedFullName
+                ?.let { tokenize(normalize(it)) }
+                ?.let { matchesAdjacentExpandedNameTokens(sourceTokens, it) } == true
+        }
+        if (adjacentExpandedNameMatches.isNotEmpty()) return adjacentExpandedNameMatches
 
         val initialsSurnameMatches = roster.filter { player ->
             matchesInitialsAndSurname(sourceTokens, player)
         }
 
-        return if (initialsSurnameMatches.size == 1) {
-            initialsSurnameMatches.first()
-        } else {
-            null
+        if (initialsSurnameMatches.isNotEmpty()) return initialsSurnameMatches
+
+        // Stage 3: Fuzzy Surname match (Levenshtein distance & similarity ratio) with Initials compatibility
+        val fuzzyMatches = roster.filter { player ->
+            matchesInitialsAndFuzzySurname(sourceTokens, player, ::isSurnameFuzzyMatch)
+        }
+        if (fuzzyMatches.isNotEmpty()) return fuzzyMatches
+
+        // Stage 4: Transliteration-normalized Phonetic Surname match with Initials compatibility
+        return roster.filter { player ->
+            matchesInitialsAndFuzzySurname(sourceTokens, player, ::isSurnamePhoneticMatch)
         }
     }
 
-    internal fun normalize(name: String): String {
-        val decomposed = Normalizer.normalize(name, Normalizer.Form.NFD)
-        val withoutDiacritics = decomposed.replace(Regex("\\p{M}+"), "")
-        return withoutDiacritics
-            .replace(Regex("[.,'-]"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .lowercase(Locale.ROOT)
-    }
+    /**
+     * Attempts to find a "close enough" match from the roster for elimination or fallback matching
+     * when high-confidence stages (Tiers 1-4) do not yield a match.
+     *
+     * @param sourceName The source name string.
+     * @param roster The remaining available candidates in the match roster.
+     * @return A `StatsRosterPlayer` if an unambiguous close-enough candidate is found; null otherwise.
+     */
+    fun matchCloseEnough(
+        sourceName: String,
+        roster: List<StatsRosterPlayer>
+    ): StatsRosterPlayer? {
+        if (sourceName.isBlank() || roster.isEmpty()) return null
 
-    private fun tokenize(normalized: String): List<String> =
-        normalized.split(' ').filter(String::isNotBlank)
-
-    private fun matchesInitialsAndSurname(
-        sourceTokens: List<String>,
-        candidate: StatsRosterPlayer
-    ): Boolean {
-        if (sourceTokens.isEmpty()) return false
-
-        val candidateFullNameTokens = tokenize(normalize(candidate.fullName))
-        val candidateKnownAsTokens = candidate.knownAs?.let { tokenize(normalize(it)) }.orEmpty()
-        val candidateSurnameTokens = candidate.surname?.let { tokenize(normalize(it)) }.orEmpty()
-
-        if (checkTokensMatch(sourceTokens, candidateFullNameTokens, candidateSurnameTokens)) {
-            return true
+        val candidates = roster.filter { candidate ->
+            isCloseEnoughMatch(sourceName, candidate)
         }
 
-        if (candidateKnownAsTokens.isNotEmpty() &&
-            checkTokensMatch(sourceTokens, candidateKnownAsTokens, candidateSurnameTokens)
-        ) {
-            return true
-        }
+        if (candidates.isEmpty()) {
+            if (roster.size == 1) {
+                val single = roster.first()
+                val srcTokens = tokenize(normalize(sourceName))
+                val candTokens = tokenize(normalize(single.fullName))
+                val srcSurname = srcTokens.lastOrNull().orEmpty()
+                val candSurname = tokenize(normalize(single.surname.orEmpty())).lastOrNull().takeIf { it?.isNotEmpty() == true } ?: candTokens.lastOrNull().orEmpty()
 
-        return false
-    }
+                // Guard against short surnames (<= 3 chars) mismatching (e.g. Roy vs Ray)
+                if (srcSurname.length <= 3 && candSurname.length <= 3 && srcSurname != candSurname) {
+                    return null
+                }
 
-    private fun checkTokensMatch(
-        sourceTokens: List<String>,
-        candidateTokens: List<String>,
-        explicitSurnameTokens: List<String>
-    ): Boolean {
-        if (sourceTokens.isEmpty() || candidateTokens.isEmpty()) return false
-
-        if (sourceTokens.size == 1) {
-            val single = sourceTokens.first()
-            val candidateSurname = if (explicitSurnameTokens.isNotEmpty()) {
-                explicitSurnameTokens.joinToString(" ")
-            } else {
-                candidateTokens.last()
+                val srcInitial = srcTokens.firstOrNull()?.firstOrNull { it.isLetter() }
+                val candInitial = candTokens.firstOrNull()?.firstOrNull { it.isLetter() }
+                if (srcInitial != null && candInitial != null && (srcInitial == candInitial || isInitialsCompatible(srcInitial.toString(), candInitial.toString()))) {
+                    val ratio = maxOf(
+                        similarityRatio(normalize(sourceName), normalize(single.fullName)),
+                        single.knownAs?.let { similarityRatio(normalize(sourceName), normalize(it)) } ?: 0.0,
+                        single.expandedFullName?.let { similarityRatio(normalize(sourceName), normalize(it)) } ?: 0.0
+                    )
+                    if (ratio >= 0.40 || (srcTokens.size > 1 && candTokens.size > 1)) {
+                        return single
+                    }
+                }
             }
-            return single == candidateSurname || single == candidateTokens.first()
+            return null
+        }
+        if (candidates.size == 1) return candidates.first()
+
+        val scored = candidates.map { it to calculateSimilarityScore(sourceName, it) }
+            .sortedByDescending { it.second }
+
+        val top = scored[0]
+        val second = scored[1]
+
+        if (top.second - second.second >= 0.15) {
+            return top.first
         }
 
-        val candidateSurnameTokensResolved = if (explicitSurnameTokens.isNotEmpty()) {
-            explicitSurnameTokens
-        } else {
-            listOf(candidateTokens.last())
-        }
-
-        val surnameLength = candidateSurnameTokensResolved.size
-        if (sourceTokens.size > surnameLength) {
-            val sourceSurnameParts = sourceTokens.takeLast(surnameLength)
-            if (sourceSurnameParts == candidateSurnameTokensResolved) {
-                val sourceFirstParts = sourceTokens.dropLast(surnameLength)
-                val candidateFirstParts = candidateTokens.dropLast(surnameLength)
-                return matchFirstNamesOrInitials(sourceFirstParts, candidateFirstParts)
-            }
-        }
-
-        val lastSourceToken = sourceTokens.last()
-        val lastCandidateToken = candidateTokens.last()
-        if (lastSourceToken == lastCandidateToken) {
-            val sourceFirstParts = sourceTokens.dropLast(1)
-            val candidateFirstParts = candidateTokens.dropLast(1)
-            return matchFirstNamesOrInitials(sourceFirstParts, candidateFirstParts)
-        }
-
-        return false
+        return null
     }
 
-    private fun matchFirstNamesOrInitials(
-        sourceFirstParts: List<String>,
-        candidateFirstParts: List<String>
-    ): Boolean {
-        if (sourceFirstParts.isEmpty() || candidateFirstParts.isEmpty()) return false
-
-        if (sourceFirstParts == candidateFirstParts) {
-            return true
-        }
-
-        val sourceInitialsList = extractInitials(sourceFirstParts)
-        val candidateInitialsList = extractInitials(candidateFirstParts)
-
-        for (sInit in sourceInitialsList) {
-            for (cInit in candidateInitialsList) {
-                if (sInit == cInit) return true
-                if (sInit.isNotEmpty() && cInit.startsWith(sInit)) return true
-                if (cInit.isNotEmpty() && sInit.startsWith(cInit)) return true
-            }
-        }
-
-        if (sourceFirstParts.all { part ->
-                part in candidateFirstParts ||
-                    candidateFirstParts.any { it.startsWith(part) }
-            }
-        ) {
-            return true
-        }
-
-        return false
-    }
-
-    internal fun extractInitials(parts: List<String>): List<String> {
-        if (parts.isEmpty()) return emptyList()
-        val initials = mutableSetOf<String>()
-
-        val perWord = parts.mapNotNull { it.firstOrNull() }.joinToString("")
-        if (perWord.isNotEmpty()) initials.add(perWord)
-
-        if (parts.size == 1) {
-            initials.add(parts.first())
-        }
-
-        return initials.toList()
-    }
+    // Facade delegations for backward compatibility
+    fun levenshteinDistance(a: String, b: String): Int = TextDistance.levenshteinDistance(a, b)
+    fun similarityRatio(a: String, b: String): Double = TextDistance.similarityRatio(a, b)
+    fun normalizeTransliteration(name: String): String = TransliterationNormalizer.normalizeTransliteration(name)
+    fun isSurnameFuzzyMatch(sourceSurname: String, candidateSurname: String): Boolean = SurnameMatcher.isSurnameFuzzyMatch(sourceSurname, candidateSurname)
+    fun isSurnamePhoneticMatch(sourceSurname: String, candidateSurname: String): Boolean = SurnameMatcher.isSurnamePhoneticMatch(sourceSurname, candidateSurname)
+    fun isSurnameRelaxedFuzzyMatch(sourceSurname: String, candidateSurname: String): Boolean = SurnameMatcher.isSurnameRelaxedFuzzyMatch(sourceSurname, candidateSurname)
+    fun isCloseEnoughMatch(sourceName: String, candidate: StatsRosterPlayer): Boolean = CandidateScoreEvaluator.isCloseEnoughMatch(sourceName, candidate)
+    fun calculateSimilarityScore(sourceName: String, candidate: StatsRosterPlayer): Double = CandidateScoreEvaluator.calculateSimilarityScore(sourceName, candidate)
+    internal fun normalize(name: String): String = TransliterationNormalizer.normalize(name)
+    internal fun isInitialsCompatible(sInit: String, cInit: String): Boolean = TokenMatcher.isInitialsCompatible(sInit, cInit)
+    internal fun extractInitials(parts: List<String>): List<String> = TokenMatcher.extractInitials(parts)
 }

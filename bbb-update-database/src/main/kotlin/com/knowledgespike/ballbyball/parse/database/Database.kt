@@ -17,7 +17,10 @@ import com.knowledgespike.ballbyball.clishared.schema.TeamNamePolicy
 import java.time.LocalDate
 import java.util.stream.Stream
 
-class Database(private val outputAdapter: OutputAdapter) {
+class Database(
+    private val outputAdapter: OutputAdapter,
+    private val playerRegistry: Map<String, PersonEntity> = emptyMap()
+) {
     private val log by LoggerDelegate()
 
     companion object {
@@ -47,7 +50,9 @@ class Database(private val outputAdapter: OutputAdapter) {
                     .map { teamNameForMatch(it, cricSheet) }
                     .map(outputAdapter::upsertTeam)
                 Translate.getPeople(cricSheet).forEach { person ->
-                    outputAdapter.upsertPerson(person.id, person.name, person.caId)
+                    val registryPerson = playerRegistry[person.id]
+                    val caId = if (person.caId != 0) person.caId else (registryPerson?.caId ?: 0)
+                    outputAdapter.upsertPerson(person.id, person.name, caId)
                 }
 
                 val players = Translate.getPlayers(cricSheet.match.players, cricSheet)
@@ -72,7 +77,7 @@ class Database(private val outputAdapter: OutputAdapter) {
                 addMatchPeople(match, tvUmpires, "TV_UMPIRE")
                 addMatchPeople(match, reserveUmpires, "RESERVE_UMPIRE")
                 addMatchPeople(match, matchReferees, "MATCH_REFEREE")
-                addBallByBall(fileName, match, teams, cricSheet)
+                addBallByBall(match, teams, cricSheet)
             }
         } catch (e: InvalidStateException) {
             if (isDuplicateSourceCaIdException(e)) {
@@ -97,7 +102,6 @@ class Database(private val outputAdapter: OutputAdapter) {
     }
 
     private fun addBallByBall(
-        fileName: String,
         match: MatchEntity,
         teams: List<Team>,
         cricSheet: BbbMatchData
@@ -312,7 +316,8 @@ class Database(private val outputAdapter: OutputAdapter) {
     private fun requirePersonKey(sourceId: String?, displayName: String): Long {
         if (sourceId == null)
             throw InvalidStateException("Person is not registered: $displayName")
-        return outputAdapter.upsertPerson(sourceId, displayName, 0)
+        val caId = playerRegistry[sourceId]?.caId ?: 0
+        return outputAdapter.upsertPerson(sourceId, displayName, caId)
     }
 
     private fun parseDate(value: String): LocalDate = LocalDate.parse(value)

@@ -15,6 +15,7 @@ import com.knowledgespike.ballbyball.parse.database.adapter.postgres.SqlScriptOu
 import com.knowledgespike.ballbyball.parse.database.adapter.sqlite.SqlOutputAdapter as SqliteSqlOutputAdapter
 import com.knowledgespike.ballbyball.parse.database.adapter.sqlite.SqlScriptOutputAdapter as SqliteSqlScriptOutputAdapter
 import org.apache.commons.cli.*
+import org.apache.commons.cli.help.HelpFormatter
 import java.nio.file.Path
 import kotlin.system.exitProcess
 
@@ -41,7 +42,7 @@ class Application {
 
         internal fun execute(args: Array<String>): Int = try {
             val options = createCommandLineOptions()
-            val formatter = org.apache.commons.cli.help.HelpFormatter.builder().get()
+            val formatter = HelpFormatter.builder().get()
             val header = "Parse cricsheet data into database"
             if (args.isEmpty() || args.any { it == "-h" || it == "--help" }) {
                 formatter.printHelp("java parsecard", header, options, "", true)
@@ -58,14 +59,19 @@ class Application {
 
             val input = UpdateDatabaseArguments.from(cmd)
             val outputTarget = resolveOutputTarget(cmd, input)
-            val people = PlayerRegistryParser().parse(input.playerRegistry.toFile()).map {
-                PersonEntity(it.id, it.name, it.caId.toIntOrNull() ?: 0)
-            }.toList()
+            val playerRegistry = try {
+                PlayerRegistryParser().parse(input.playerRegistry.toFile()).map {
+                    PersonEntity(it.id, it.name, it.caId.toIntOrNull() ?: 0)
+                }.toList().associateBy { it.id }
+            } catch (e: Exception) {
+                log.warn("Could not load player registry from {}: {}", input.playerRegistry, e.message)
+                emptyMap()
+            }
 
             when (outputTarget) {
                 is OutputTarget.ScriptTarget -> createScriptOutputAdapter(outputTarget.databaseType, outputTarget.output)
                     .use { adapter ->
-                        runImport(adapter, input, people)
+                        runImport(adapter, input, playerRegistry)
                         adapter.complete()
                     }
                 is OutputTarget.DatabaseTarget -> {
@@ -77,14 +83,14 @@ class Application {
                     dbConnection.connect.use { db ->
                         createSqlOutputAdapter(outputTarget.connectionString, db.connection)
                             .use { adapter ->
-                                runImport(adapter, input, people)
+                                runImport(adapter, input, playerRegistry)
                                 adapter.complete()
                             }
                     }
                 }
                 is OutputTarget.CsvTarget -> CsvOutputAdapter(outputTarget.directory, outputTarget.force)
                     .use { adapter ->
-                        runImport(adapter, input, people)
+                        runImport(adapter, input, playerRegistry)
                         adapter.complete()
                     }
             }
@@ -194,10 +200,9 @@ class Application {
         private fun runImport(
             adapter: OutputAdapter,
             input: UpdateDatabaseInput,
-            people: List<PersonEntity>
+            playerRegistry: Map<String, PersonEntity>
         ) {
-            val database = Database(adapter)
-            database.writeAllPeople(people.stream())
+            val database = Database(adapter, playerRegistry)
             val ballByBallParser = BallByBallParser()
             importMatches(database, ballByBallParser, input.dataDirectory)
         }

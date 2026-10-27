@@ -274,7 +274,7 @@ insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'T
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Lions', 125);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Knights', 110);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Dolphins', 46696);
-insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Warriors (FairBreak) Women', 49084);
+insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Warriors (FairBreak)', 49084);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Birmingham Phoenix', 45098);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'London Spirit', 45099);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Manchester Originals', 45100);
@@ -309,5 +309,5 @@ insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Z
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Turks and Caicos Island', 2319);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'South Africa', 25291);
 insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'South Africa', 10312);
-insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Guyana Amazon Warriors Women', 55513);
-insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Royal Challengers Bengaluru Women', 51559);
+insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Guyana Amazon Warriors', 55513);
+insert into team_name_aliases values ('f3c879d8-6d5c-5f33-9c7f-4f6c2dcff18b', 'Royal Challengers Bengaluru', 51559);

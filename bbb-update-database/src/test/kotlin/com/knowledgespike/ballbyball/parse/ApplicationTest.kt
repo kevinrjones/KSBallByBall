@@ -3,17 +3,11 @@ package com.knowledgespike.ballbyball.parse
 import com.knowledgespike.ballbyball.clishared.identity.CanonicalMatchEnvelope
 import com.knowledgespike.ballbyball.clishared.identity.MergeEvidence
 import com.knowledgespike.ballbyball.clishared.identity.SourceReference
-import com.knowledgespike.ballbyball.clishared.schema.BbbMatchData
-import com.knowledgespike.ballbyball.clishared.schema.Event
-import com.knowledgespike.ballbyball.clishared.schema.Info
-import com.knowledgespike.ballbyball.clishared.schema.Outcome
-import com.knowledgespike.ballbyball.clishared.schema.PlayersRegistry
-import com.knowledgespike.ballbyball.clishared.schema.Toss
+import com.knowledgespike.ballbyball.clishared.schema.*
 import com.knowledgespike.ballbyball.identity.CanonicalMatchId
 import com.knowledgespike.ballbyball.identity.ProviderId
 import com.knowledgespike.ballbyball.identity.Sha256Digest
 import com.knowledgespike.ballbyball.identity.SourceRecordId
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.junit.jupiter.api.Test
@@ -24,7 +18,7 @@ import strikt.assertions.isEqualTo
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.LocalDate
-import java.util.UUID
+import java.util.*
 
 class ApplicationTest {
     @Test
@@ -85,6 +79,8 @@ class ApplicationTest {
         val output = Files.createDirectory(baseDirectory.resolve("csv"))
         val sentinel = output.resolve("replace.txt")
         Files.writeString(sentinel, "replace me")
+        val matchFile = baseDirectory.resolve("matches/match.json")
+        Files.writeString(matchFile, Json.encodeToString(sampleEnvelope()))
 
         Application.execute(csvArguments(baseDirectory, force = true))
 
@@ -122,6 +118,72 @@ class ApplicationTest {
         val sql = Files.readString(outputFile)
         expectThat(sql).contains("'1890a7a8-f76d-5f36-89f7-39b0319044b0'")
         expectThat(sql).not().contains("'1890a7a8-f76d-5f36-89f7-39b0319044b1'")
+    }
+
+    @Test
+    fun `given player in csv only and player in json when application runs then only json player is inserted in sql script`(
+        @TempDir temporaryDirectory: Path
+    ) {
+        val baseDirectory = prepareInput(temporaryDirectory)
+        val csvContent = PLAYER_REGISTRY_HEADER +
+            "p1,Alice InJson,,,,,,,,,,,,101\n" +
+            "p2,Bob CsvOnly,,,,,,,,,,,,202\n"
+        Files.writeString(baseDirectory.resolve("players.csv"), csvContent)
+
+        val outputFile = baseDirectory.resolve("generated.sql")
+        val match = sampleEnvelope().let { data ->
+            data.copy(
+                match = data.match.copy(
+                    match = data.match.match.copy(
+                        registry = PlayersRegistry(
+                            people = mapOf("Alice InJson" to "p1"),
+                            peopleCaId = mapOf("p1" to 101)
+                        )
+                    )
+                )
+            )
+        }
+        Files.writeString(baseDirectory.resolve("matches/match.json"), Json.encodeToString(match))
+
+        val exitCode = Application.execute(arguments(baseDirectory, "mariadb"))
+
+        expectThat(exitCode).isEqualTo(0)
+        val sql = Files.readString(outputFile)
+        expectThat(sql).contains("'Alice InJson'")
+        expectThat(sql).not().contains("'Bob CsvOnly'")
+    }
+
+    @Test
+    fun `given player in csv only and player in json when application outputs csv then only json player is in people csv`(
+        @TempDir temporaryDirectory: Path
+    ) {
+        val baseDirectory = prepareInput(temporaryDirectory)
+        val csvContent = PLAYER_REGISTRY_HEADER +
+            "p1,Alice InJson,,,,,,,,,,,,101\n" +
+            "p2,Bob CsvOnly,,,,,,,,,,,,202\n"
+        Files.writeString(baseDirectory.resolve("players.csv"), csvContent)
+
+        val match = sampleEnvelope().let { data ->
+            data.copy(
+                match = data.match.copy(
+                    match = data.match.match.copy(
+                        registry = PlayersRegistry(
+                            people = mapOf("Alice InJson" to "p1"),
+                            peopleCaId = mapOf("p1" to 0) // caId 0 in json, 101 in csv
+                        )
+                    )
+                )
+            )
+        }
+        Files.writeString(baseDirectory.resolve("matches/match.json"), Json.encodeToString(match))
+
+        val exitCode = Application.execute(csvArguments(baseDirectory, force = true))
+
+        expectThat(exitCode).isEqualTo(0)
+        val peopleCsv = Files.readString(baseDirectory.resolve("csv/people.csv"))
+        expectThat(peopleCsv).contains("1,p1,Alice InJson,AliceInJson,,101")
+        expectThat(peopleCsv).not().contains("Bob CsvOnly")
+        expectThat(peopleCsv).not().contains("p2")
     }
 
     private fun sampleEnvelope(

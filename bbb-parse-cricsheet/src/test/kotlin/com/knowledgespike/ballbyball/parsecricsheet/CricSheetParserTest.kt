@@ -115,6 +115,48 @@ class CricSheetParserTest {
     }
 
     @Test
+    fun `given nested subdirectory input when parsed then relative path is passed to player linker`() {
+        val root = Files.createTempDirectory("parse-cricsheet-player-link-nested")
+        val input = root.resolve("raw")
+        val subDir = input.resolve("odis_json")
+        val output = root.resolve("parsed")
+        Files.createDirectories(subDir)
+        Files.writeString(subDir.resolve("12345.json"), sourceDocument())
+
+        var passedSourceFile: String? = null
+
+        val playerLinker = object : PlayerLinker {
+            override fun linkPlayers(
+                sourceCaId: SourceCaId,
+                matchPlayers: Map<String, String>
+            ): List<PlayerMatchResult> = emptyList()
+
+            override fun linkPlayers(
+                sourceCaId: SourceCaId,
+                matchPlayers: Map<String, String>,
+                sourceFileName: String
+            ): List<PlayerMatchResult> {
+                passedSourceFile = sourceFileName
+                return listOf(
+                    PlayerMatchResult(
+                        sourcePersonId = SourcePersonId.from("person-1"),
+                        sourceName = "Batter One",
+                        statsPlayerId = StatsPlayerId.from(101)
+                    )
+                )
+            }
+        }
+
+        val result = CricSheetParser(
+            matchLinker = MatchLinker { _, _ -> StatsLinkResult.Linked(SourceCaId.from("ca-12345")) },
+            playerLinker = playerLinker
+        ).parse(input, output)
+
+        expectThat(result.succeeded).isEqualTo(true)
+        expectThat(passedSourceFile).isEqualTo("odis_json/12345.json")
+    }
+
+    @Test
     fun `given a stats lookup throws then normalized output is retained and success replaces it`() {
         val root = Files.createTempDirectory("parse-cricsheet-routing")
         val input = root.resolve("input")

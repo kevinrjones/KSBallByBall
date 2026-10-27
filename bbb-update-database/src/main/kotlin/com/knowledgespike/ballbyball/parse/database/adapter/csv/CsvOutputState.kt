@@ -60,6 +60,7 @@ internal class CsvOutputState(
     fun emitRow(row: RelationalRow) {
         if (row.operation == RelationalRowOperation.UPDATE) {
             applyUpdate(row)
+            return
         }
         when (row.tableName) {
             "matches" -> {
