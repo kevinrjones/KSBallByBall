@@ -12,7 +12,6 @@ version = "1.0"
 
 dependencies {
     implementation(project(":bbb-shared"))
-    implementation(project(":bbb-cli-shared"))
     implementation(libs.commons.cli)
     implementation(libs.logback.classic)
     implementation(libs.logback.core)

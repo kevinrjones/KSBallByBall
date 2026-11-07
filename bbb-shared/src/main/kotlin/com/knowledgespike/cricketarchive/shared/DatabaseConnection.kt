@@ -129,8 +129,6 @@ open class DataSource {
         config.maxLifetime = 1000 * 60 * 10
         config.connectionTimeout = 1000 * 60 * 10
 
-
-
         config.addDataSourceProperty("cachePrepStmts", "true")
         config.addDataSourceProperty("prepStmtCacheSize", "250")
         config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048")

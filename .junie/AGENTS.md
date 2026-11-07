@@ -345,25 +345,10 @@ For each sprint/task **Title**
 
 # Contributor navigation
 
-Read `docs/architecture/applications.md` before changing `bbb-api`, `bbb-web`,
-or their `bbb-shared` JSON contracts. It is the architecture map for the
-feature slices, runtime flows, validation/error handling, and test seams.
+Read `docs/architecture/applications.md` for the architecture map of module boundaries
+and data flows.
 
-- Organize features into vertical slices (`feature.<feature_name>`) containing their presentation (routes), domain (use
-  cases/repositories), and data (jOOQ persistence) layers.
-- Shared infrastructure (database connection pools, JWT security configuration, application bootstrap) belongs in shared
-  packages (`config`, `bootstrap`) or `bbb-shared`.
-- Define JSON request/response/error types in `bbb-shared` with
-  `kotlinx.serialization`.
+- Organize shared schemas and identity contracts in `bbb-shared`.
 - Run `./gradlew clean check --no-daemon` after application changes.
-
-## Angular component templates
-
-- Keep Angular component HTML in a separate sibling `.component.html` file rather than embedding markup in the
-  TypeScript decorator.
-- Reference the external template with `templateUrl: './component-name.component.html'` and keep the file name aligned
-  with the component TypeScript file.
-- Apply this convention to every Angular component, including standalone components; do not use the inline `template`
-  property for new or migrated components.
 
 The broader project standards remain in `.junie/AGENTS.md`.

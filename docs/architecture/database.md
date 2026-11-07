@@ -116,20 +116,6 @@ The initial migration creates the unique alias-triple index. Before restoring
 operator-owned aliases during cutover, remove exact duplicate triples from the
 export; do not collapse distinct `stats_team_id` targets for one source name.
 
-## API reads
-
-`bbb-api` generates checked-in jOOQ bindings from the relational schema. The
-matches feature uses:
-
-- `JooqMatchRepository` for recent summaries and filtered search, joining
-  `matches`, `dates`, `teams`, `grounds`, `innings`, and `deliveries`.
-- `JooqMatchScoresheetLoader` for ordered innings and deliveries, joining
-  `people`, `wickets`, `delivery_wickets`, and `delivery_fielders`.
-
-The repository and loader map into the existing `MatchSummary`, search, and
-scoresheet domain models. Public HTTP contracts in `bbb-shared` are unchanged;
-API callers use `public_match_id` and never depend on the internal numeric key.
-
 ## Cutover procedure
 
 Existing databases are rebuild targets, not in-place translation targets:
@@ -149,8 +135,8 @@ Existing databases are rebuild targets, not in-place translation targets:
    export rather than discarding distinct targets for one source name.
 5. Verify the restored row count and alias targets, then replay every canonical
    envelope through the updater.
-6. Verify counts, identity/provenance rejection, recent summaries, search, and
-   scoresheets before pointing the API at the rebuilt database.
+6. Verify counts, identity/provenance rejection, and data integrity before putting
+   the rebuilt database into use.
 
 The migrations intentionally contain no warehouse-row copy logic. Numeric
 internal IDs may change during replay; canonical and public identities are the

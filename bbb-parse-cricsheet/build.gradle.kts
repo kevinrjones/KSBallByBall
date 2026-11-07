@@ -10,7 +10,6 @@ group = "com.knowledgespike"
 version = "1.0"
 
 dependencies {
-    implementation(project(":bbb-cli-shared"))
     implementation(project(":bbb-shared"))
     implementation(libs.commons.cli)
     implementation(libs.kotlinx.serialization)

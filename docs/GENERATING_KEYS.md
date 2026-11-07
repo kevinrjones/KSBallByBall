@@ -164,10 +164,10 @@ single-source Cricsheet path, but:
 ## Implementation references
 
 - Identity generation:
-  `bbb-cli-shared/.../identity/MatchIdentity.kt`
+  `bbb-shared/.../identity/DeterministicIdentity.kt`
 - Public ID value type:
   `bbb-shared/.../types/values/PublicMatchId.kt`
 - Warehouse uniqueness:
-  `bbb-update-database/migrations/*/4__public_match_id.sql`
+  `bbb-update-database/migrations/*/1__initial_tables.sql`
 - Architecture overview:
   [applications.md](architecture/applications.md)

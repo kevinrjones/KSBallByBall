@@ -1,23 +1,34 @@
 package com.knowledgespike.ballbyball.identity
 
+import arrow.core.Either
 import org.junit.jupiter.api.Test
 import strikt.api.expectThat
 import strikt.assertions.isEqualTo
+import strikt.assertions.isTrue
 
 class SourcePersonIdTest {
     @Test
-    fun `given a valid source person identifier when created then preserve its string value`() {
-        val sourcePersonId = SourcePersonId.of("8903c73e").getOrNull()
+    fun `accepts valid identifiers within max length`() {
+        val validIds = listOf("12345", "a", "A1-B2_C3", "a".repeat(50))
 
-        expectThat(sourcePersonId?.value).isEqualTo("8903c73e")
+        validIds.forEach { rawId ->
+            val result = SourcePersonId.of(rawId)
+            expectThat(result is Either.Right).isTrue()
+            expectThat(result.getOrNull()?.value).isEqualTo(rawId)
+        }
     }
 
     @Test
-    fun `given blank or overlong source person identifiers when created then reject them`() {
-        val blank = SourcePersonId.of(" ")
-        val overlong = SourcePersonId.of("x".repeat(SourcePersonId.MAX_LENGTH + 1))
+    fun `rejects invalid identifiers`() {
+        val invalidIds = listOf(
+            null,
+            "",
+            "   ",
+            "a".repeat(51)
+        )
 
-        expectThat(blank.getOrNull()).isEqualTo(null)
-        expectThat(overlong.getOrNull()).isEqualTo(null)
+        invalidIds.forEach { rawId ->
+            expectThat(SourcePersonId.of(rawId) is Either.Left).isTrue()
+        }
     }
 }

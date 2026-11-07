@@ -3,20 +3,15 @@
 [![CI](https://github.com/kevinrjones/acs_ball_by_ball/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinrjones/acs_ball_by_ball/actions/workflows/ci.yml)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
-[![Ktor](https://img.shields.io/badge/Ktor-3.5-087CFA?logo=ktor&logoColor=white)](https://ktor.io/)
-[![Angular](https://img.shields.io/badge/Angular-19-DD0031?logo=angular&logoColor=white)](https://angular.dev/)
 [![Gradle](https://img.shields.io/badge/Gradle-build-02303A?logo=gradle&logoColor=white)](https://gradle.org/)
 
 Gradle multi-module applications for retrieving cricket ball-by-ball data,
-normalizing it into canonical match envelopes, loading a relational database, and serving
-match search and scoresheet APIs through a Ktor backend and Angular web UI.
+normalizing it into canonical match envelopes, and loading a relational database.
 
 | | |
 | --- | --- |
 | **Repository** | [`kevinrjones/acs_ball_by_ball`](https://github.com/kevinrjones/acs_ball_by_ball) |
 | **Root project** | `BallByBall` |
-| **Default web port** | `8080` |
-| **Default API port** | `8081` |
 | **Database dialects** | MariaDB / MySQL, PostgreSQL, SQLite |
 
 ## Contents
@@ -25,8 +20,7 @@ match search and scoresheet APIs through a Ktor backend and Angular web UI.
 - [Data pipeline](#data-pipeline)
 - [Modules](#modules)
 - [Tech stack](#tech-stack)
-- [Match identity and public URLs](#match-identity-and-public-urls)
-- [API surface](#api-surface)
+- [Match identity](#match-identity)
 - [Quick start](#quick-start)
 - [Docker Compose](#docker-compose)
 - [CI/CD](#cicd)
@@ -39,9 +33,8 @@ match search and scoresheet APIs through a Ktor backend and Angular web UI.
 - A Cricsheet adapter that emits source and canonical match envelopes
 - A relational loader that writes SQL scripts, CSV files, or JDBC inserts, with
   transactional match writes across all output adapters
-- A read-only Ktor REST API over normalized match data
-- A Ktor-hosted, feature-sliced Angular SPA with OIDC BFF login and API proxying
-- Shared contracts, tiny types, Flyway migrations, and architecture docs
+- Bulk update utilities for loading exported CSV files into supported databases
+- Shared CLI schemas, tiny types, Flyway migrations, and architecture docs
 
 ## Data pipeline
 
@@ -68,9 +61,6 @@ bbb-update-database
         │
         ▼
   Relational match data (MariaDB / PostgreSQL / SQLite, SQL, or CSV)
-        │
-        ▼
-bbb-api  ──proxied by──▶  bbb-web (Angular)
 ```
 
 Relational loading accepts **canonical envelopes only**. Cross-provider
@@ -119,7 +109,7 @@ from the initial migrations, while keeping additional operator aliases intact.
 The authoritative stats-link exclusion data is versioned in
 [`bbb-parse-cricsheet/src/main/resources/policies/`](bbb-parse-cricsheet/src/main/resources/policies/).
 Women's competition and team-name naming exceptions are maintained in
-[`bbb-cli-shared/src/main/resources/policies/`](bbb-cli-shared/src/main/resources/policies/).
+[`bbb-shared/src/main/resources/policies/`](bbb-shared/src/main/resources/policies/).
 
 ## Modules
 
@@ -127,11 +117,9 @@ Women's competition and team-name naming exceptions are maintained in
 | --- | --- | --- |
 | `bbb-get-cricsheet-data` | CLI | Download raw Cricsheet JSON archives and player registers |
 | `bbb-parse-cricsheet` | CLI | Convert raw Cricsheet JSON into source/canonical envelopes |
-| `bbb-cli-shared` | Library | Shared CLI match schema and deterministic identity contracts |
+| `bbb-shared` | Library | Shared schemas, utilities, and deterministic identity contracts |
 | `bbb-update-database` | CLI | Load canonical envelopes into normalized SQL, CSV, or JDBC output |
-| `bbb-shared` | Library | Shared HTTP contracts and validated tiny types |
-| `bbb-api` | Service | Read-only relational REST API (default port `8081`) |
-| `bbb-web` | Service | Feature-sliced Angular SPA, OIDC BFF, and API proxy (default port `8080`) |
+| `bbb-bulkupdate` | CLI | Bulk-load exported CSV files into supported databases |
 
 Module registration lives in `settings.gradle.kts`. Dependency versions live in
 `gradle/libs.versions.toml`.
@@ -141,14 +129,11 @@ Module registration lives in `settings.gradle.kts`. Dependency versions live in
 | Area | Choices in this repo |
 | --- | --- |
 | Language / build | Kotlin, Java 21 toolchain, Gradle |
-| HTTP services | Ktor |
-| Frontend | Angular 19 SPA hosted by `bbb-web` |
 | Functional types / validation | Arrow (`Either`, boundary parsing) |
 | Serialization | `kotlinx.serialization` |
-| Persistence access | jOOQ (API), JDBC adapters (loader) |
+| Persistence access | JDBC adapters (loader) |
 | Schema migration | Flyway (`bbb-update-database/migrations`) |
 | Databases | MariaDB / MySQL, PostgreSQL, SQLite |
-| Auth | JWT on the API; OIDC BFF sessions on the web app |
 | Local runtime | Docker Compose (`compose.yaml`) |
 | CI | GitHub Actions (`.github/workflows`) |
 
@@ -161,23 +146,17 @@ The MySQL, PostgreSQL, and SQLite migration directories each contain a single
 complete `1__initial_tables.sql`, including the unique team-alias triple key;
 see [database architecture](docs/architecture/database.md) for cutover details.
 
-## Match identity and public URLs
+## Match identity
 
 Matches use layered deterministic identifiers. They are not interchangeable.
 
-| Identifier | Purpose | Exposed in URLs? |
-| --- | --- | --- |
-| `sourceRecordId` | Provider-scoped UUIDv5 for one source record | No |
-| `rawContentDigest` | SHA-256 of exact downloaded bytes; revision evidence only | No |
-| `canonicalMatchId` | Stable UUID of the reconciled/canonical match | No |
-| `publicMatchId` | Ten-digit URL identifier derived from the canonical UUID | Yes |
-| `matchKey` | Generated internal relational key for SQL joins | No |
-
-Public scoresheet URLs look like:
-
-```text
-/api/matches/{publicMatchId}/scoresheet
-```
+| Identifier | Purpose |
+| --- | --- |
+| `sourceRecordId` | Provider-scoped UUIDv5 for one source record |
+| `rawContentDigest` | SHA-256 of exact downloaded bytes; revision evidence only |
+| `canonicalMatchId` | Stable UUID of the reconciled/canonical match |
+| `publicMatchId` | Ten-digit identifier derived from the canonical UUID |
+| `matchKey` | Generated internal relational key for SQL joins |
 
 `publicMatchId` is deterministic and unique-constrained. Collisions fail loudly
 rather than probing another value.
@@ -190,25 +169,6 @@ Related decisions:
 
 - [ADR 0003: Deterministic source and canonical match identity](docs/adr/0003-deterministic-match-identity.md)
 - [ADR 0004: Deterministic public match identifiers](docs/adr/0004-deterministic-public-match-identifiers.md)
-
-## API surface
-
-Authenticated match routes (JWT bearer):
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/matches` | Recent matches (`days` / `limit`) |
-| `GET` | `/api/matches/search` | Paginated match search |
-| `GET` | `/api/matches/{publicMatchId}/scoresheet` | Match scoresheet |
-
-Operational routes:
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/health` | Database health |
-| `GET` | `/api/heartbeat/alive` | Liveness heartbeat |
-
-JSON request/response/error contracts are defined in `bbb-shared`.
 
 ## Quick start
 
@@ -230,7 +190,7 @@ cd acs_ball_by_ball
 
 ### Common developer workflows
 
-Full command examples for retrieval, parsing, relational loading, API, and web
+Full command examples for retrieval, parsing, relational loading, and bulk updates
 are in:
 
 - **[README-DEV.md](README-DEV.md)**
@@ -252,9 +212,8 @@ Typical local data path (details and flags in the developer runbook):
 # 3. Load relational output (SQL / CSV / JDBC)
 ./gradlew :bbb-update-database:run --no-daemon --args="..."
 
-# 4. Run API and web against a migrated database
-./gradlew :bbb-api:run --no-daemon
-./gradlew :bbb-web:run --no-daemon
+# 4. Optional: Bulk load CSV files into database
+./gradlew :bbb-bulkupdate:run --no-daemon --args="..."
 ```
 
 ### Environment defaults
@@ -268,23 +227,11 @@ Copy `.env.example` when using Compose:
 | `DB_PASSWORD` | required | Application DB password |
 | `DB_ROOT_PASSWORD` | required | MariaDB root password |
 | `DB_PORT` | `3306` | Host MariaDB port |
-| `API_PORT` | `8081` | Host API port |
-| `WEB_PORT` | `8080` | Host web port |
 | `DATA_DIR` | `./data` | Data mount for the updater container |
-| `JWT_JWKS_URL` | required | API signing-key endpoint |
-| `JWT_ISSUER` | required | API token issuer |
-| `JWT_AUDIENCE` | required | API token audience |
-| `OIDC_AUTHORITY` | required | BFF identity-provider authority |
-| `OIDC_CLIENT_ID` | required | BFF OIDC client ID |
-| `OIDC_CLIENT_SECRET` | required | BFF OIDC client secret |
-| `OIDC_REDIRECT_URI` | required | BFF callback URI |
-| `OIDC_POST_LOGOUT_REDIRECT_URI` | required | BFF post-logout URI |
-| `OIDC_REGISTRATION_URL` | required | Account registration URL |
 
-The database passwords, JWT settings, and OIDC settings are required by
-Compose; fill them in locally or through a secret manager before starting it.
-Do not commit real secrets. Prefer environment variables over hard-coded
-credentials in source files.
+The database passwords are required by Compose; fill them in locally or through a
+secret manager before starting it. Do not commit real secrets. Prefer environment
+variables over hard-coded credentials in source files.
 
 For local `bbb-parse-cricsheet` runs, copy
 `bbb-parse-cricsheet/.env.example` to `bbb-parse-cricsheet/.env` and set the
@@ -300,16 +247,11 @@ ignored by Git.
 `compose.yaml` starts:
 
 - MariaDB with init scripts from `docker/mariadb/init/`
-- `bbb-api` on port `8081`
-- `bbb-web` on port `8080`
 - `bbb-update-database` on demand via the `tools` profile
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build mariadb
 ```
-
-- Web UI: `http://localhost:8080`
-- API: `http://localhost:8081`
 
 Run the updater container after placing data under `./data` (or `DATA_DIR`):
 
@@ -337,8 +279,6 @@ Workflows live in `.github/workflows/`:
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | `ci.yml` | PRs and pushes to `main`, version tags, manual | `./gradlew clean check --no-daemon` |
-| `build-bbb-api.yml` | Version tags / manual | Build/check API; push multi-arch images on `v*.*.*` |
-| `build-bbb-web.yml` | Version tags / manual | Build/check web; push images on version tags |
 | Reusable workflows | Called by the above | Gradle setup and Docker publish helpers |
 
 Composite actions under `.github/workflows/actions/` provide JDK setup, Gradle
@@ -384,5 +324,3 @@ execution, and Docker push steps.
 - `publicMatchId` is deterministic and unique-constrained; collisions fail
   loudly rather than probing another value.
 - Internal relational joins continue to use generated `matchKey` values.
-- API feature code is organized in vertical slices under
-  `feature.<name>` (`presentation` / `domain` / `data`).

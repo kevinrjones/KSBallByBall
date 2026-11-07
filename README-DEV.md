@@ -183,16 +183,6 @@ before running the command:
     --bbb-password-environment-variable BBB_DB_PASSWORD"
 ```
 
-### `applications [:bb-web:run]`
-
-Start the browser-facing web application. The IDE configuration name is kept
-as shown, although the Gradle project is named `bbb-web`:
-
-```bash
-API_BASE_URL=http://localhost:8081 \
-./gradlew :bbb-web:run --no-daemon
-```
-
 ### `applications [:bbb-update-database:run] (csv)`
 
 Generate warehouse CSV files from the full normalized data set:
@@ -716,60 +706,24 @@ script adapter instead. `SQL_FILE` makes that offline behavior explicit. The
 SQL-file adapter resets and recreates the warehouse tables; direct `DATABASE`
 output does not reset tables.
 
-## Ktor applications
-
-The repository now includes two runnable Ktor applications. The architecture,
-configuration, endpoints, and browser-to-API flow are documented in
-`docs/architecture/applications.md`.
-
-Run the JOOQ-backed API against a migrated local database:
-
-```bash
-DB_JDBC_URL='jdbc:mariadb://localhost:3307/acs_ball_by_ball' \
-DB_USER=acs_ball_by_ball \
-DB_PASSWORD='acs_ball_by_ball-local-password' \
-./gradlew :bbb-api:run --no-daemon
-```
-
-Run the static HTMX web application in a second shell:
-
-```bash
-API_BASE_URL=http://localhost:8081 \
-./gradlew :bbb-web:run --no-daemon
-```
-
-The browser-facing application listens on port `8080` and the API listens on
-port `8081` by default. Override `WEB_PORT`, `API_PORT`, and the database
-variables rather than storing credentials in source files. Both Ktor modules
-use `application.yaml` with `${ENV:default}` substitutions; do not add an
-`application.conf` file. The API remains startable when the database is down
-and exposes that state through `/health`; the web application maps API
-connection, timeout, status, and malformed-response failures to `502 Bad
-Gateway`. The complete database container setup remains in
-`docs/setup/SETUP-DB.md`.
-
 ## Docker and Compose Development Environment
 
-A full development environment is available using Docker Compose in `compose.yaml`. This brings up:
+A development environment is available using Docker Compose in `compose.yaml`. This brings up:
 
 - **MariaDB 12.3.2** database configured with database `acs_ball_by_ball` and user `ballbyball`; set `DB_PASSWORD` and
   `DB_ROOT_PASSWORD` before starting Compose. It auto-initializes relational and dimensional warehouse schemas from
   `docker/mariadb/init/`.
-- **bbb-api** listening on port `8081` connected to the database.
-- **bbb-web** listening on port `8080` connected to `bbb-api`.
 - **bbb-update-database** container runnable on demand with the `tools` profile.
 
 On a fresh MariaDB volume, the init scripts create the complete post-migration-5
 warehouse schema, including `canonical_match_id`, `public_match_id`, and
 `match_source_reference`; Flyway is not required for that first initialization.
 
-### Start the development stack (MariaDB, API, Web)
+### Start MariaDB
 
 ```bash
-docker compose up -d --build
+docker compose up -d mariadb
 ```
-
-Access the web interface at `http://localhost:8080` and the API at `http://localhost:8081`.
 
 ### Run database updates with bbb-update-database in Docker
 
@@ -798,12 +752,6 @@ docker compose down -v
 Workflows are located in `.github/workflows/`:
 
 - **CI (`ci.yml`)**: Runs `./gradlew clean check` on all pull requests and pushes to `main`.
-- **BBB-API (`build-bbb-api.yml`)**: Builds and checks `bbb-api`, creates install distribution artifacts, and on version
-  tags (`v*.*.*`) builds and pushes multi-architecture (`linux/amd64`, `linux/arm64`) Docker images to Docker Hub.
-- **BBB-Web (`build-bbb-web.yml`)**: Builds and checks `bbb-web`, creates install distribution artifacts, and pushes
-  Docker images on version tags.
-- **BBB-Update-Database (`build-bbb-update-database.yml`)**: Builds and checks `bbb-update-database`, creates
-  distribution artifacts, and pushes Docker images on version tags.
 - **Reusable Workflows & Actions**:
     - `reusable-gradle.yml` & `reusable-docker.yml`
     - Composite actions in `.github/workflows/actions/` (`setup-jdk`, `use-gradle`, `docker-push`)

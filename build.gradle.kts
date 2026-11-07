@@ -1,13 +1,11 @@
 import com.github.benmanes.gradle.versions.updates.DependencyUpdatesTask
 
 plugins {
-    alias(ktorlibs.plugins.ktor).apply(false)
     alias(libs.plugins.kotlin.jvm).apply(false)
     alias(libs.plugins.kotlin.serialization).apply(false)
     alias(libs.plugins.version.update)
     alias(libs.plugins.catalog.update)
     alias(libs.plugins.kover).apply(false)
-    alias(libs.plugins.node.gradle).apply(false)
     alias(libs.plugins.pitest).apply(false)
 }
 

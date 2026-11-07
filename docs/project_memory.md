@@ -2,7 +2,7 @@
 
 ## Current task entry
 
-See [`project_memory/2026-10-27-thermo-nuclear-code-quality-remediation.md`](project_memory/2026-10-27-thermo-nuclear-code-quality-remediation.md) for the current task's shipped changes, decisions, gotchas, and test coverage. The preceding entry is [`project_memory/2026-10-22-exact-stats-person-name-matching.md`](project_memory/2026-10-22-exact-stats-person-name-matching.md).
+See [`project_memory/2026-11-01-update-cricsheet-archive-path.md`](project_memory/2026-11-01-update-cricsheet-archive-path.md) for the current task's shipped changes, decisions, gotchas, and test coverage. The preceding entry is [`project_memory/2026-10-31-rename-cli-shared-to-shared.md`](project_memory/2026-10-31-rename-cli-shared-to-shared.md).
 
 The historical log below is retained for traceability. At more than 5,700 lines it should be archived by dated task rather than extended with future long-form completion reports.
 
